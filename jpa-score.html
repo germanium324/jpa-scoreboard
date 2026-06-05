@@ -23,6 +23,25 @@
 
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
+    const SESSION_USER_KEY = 'jpaLoggedInUser';
+    const SESSION_TOKEN_KEY = 'jpaSessionToken';
+    const EMPTY_USER_DATA = { matchHistory: [], playerDict: {} };
+
+    const apiRequest = async (path, options = {}) => {
+      const response = await fetch(path, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(options.headers || {})
+        }
+      });
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : {};
+      if (!response.ok) {
+        throw new Error(data.error || '通信に失敗しました。');
+      }
+      return data;
+    };
 
     // --- 日時フォーマット関数 ---
     const formatTime = (ts) => {
@@ -112,46 +131,40 @@
     // ==========================================
     // ホーム画面
     // ==========================================
-    const HomeScreen = ({ onNewMatch, onViewMatchData, onViewPersonalData, loggedInUser, setLoggedInUser }) => {
+    const HomeScreen = ({ onNewMatch, onViewMatchData, onViewPersonalData, loggedInUser, onAuthSuccess, onLogout }) => {
       const [showAuthModal, setShowAuthModal] = useState(false);
       const [authMode, setAuthMode] = useState('LOGIN'); // 'LOGIN' or 'REGISTER'
       const [authName, setAuthName] = useState('');
       const [authPin, setAuthPin] = useState('');
+      const [isSubmitting, setIsSubmitting] = useState(false);
 
-      const handleAuth = () => {
+      const handleAuth = async () => {
         if (!authName || authPin.length !== 4) {
           alert('名前と4桁の数字パスワードを入力してください。');
           return;
         }
-        
-        const users = JSON.parse(localStorage.getItem('jpaRegisteredUsers') || '{}');
-        
-        if (authMode === 'REGISTER') {
-          if (users[authName]) {
-            alert('この名前は既に登録されています。');
-            return;
-          }
-          users[authName] = authPin;
-          localStorage.setItem('jpaRegisteredUsers', JSON.stringify(users));
-          localStorage.setItem('jpaLoggedInUser', authName);
-          setLoggedInUser(authName);
+
+        setIsSubmitting(true);
+        try {
+          const endpoint = authMode === 'REGISTER' ? '/api/auth/register' : '/api/auth/login';
+          const result = await apiRequest(endpoint, {
+            method: 'POST',
+            body: JSON.stringify({ name: authName, pin: authPin })
+          });
+          onAuthSuccess(result);
           setShowAuthModal(false);
-          alert('登録が完了し、ログインしました。');
-        } else {
-          // LOGIN
-          if (users[authName] && users[authName] === authPin) {
-            localStorage.setItem('jpaLoggedInUser', authName);
-            setLoggedInUser(authName);
-            setShowAuthModal(false);
-          } else {
-            alert('プレイヤー名またはパスワードが間違っています。');
+          if (authMode === 'REGISTER') {
+            alert('登録が完了し、ログインしました。');
           }
+        } catch (error) {
+          alert(error.message);
+        } finally {
+          setIsSubmitting(false);
         }
       };
 
-      const handleLogout = () => {
-        localStorage.removeItem('jpaLoggedInUser');
-        setLoggedInUser('');
+      const handleLogout = async () => {
+        await onLogout();
         setShowAuthModal(false);
       };
 
@@ -263,7 +276,7 @@
                     </div>
                     <div className="flex justify-around">
                       <button onClick={() => setShowAuthModal(false)} className="text-gray-500 font-medium px-4 py-2">キャンセル</button>
-                      <button onClick={handleAuth} className="text-green-600 font-medium px-4 py-2 border border-green-600 rounded">
+                      <button onClick={handleAuth} disabled={isSubmitting} className={`text-green-600 font-medium px-4 py-2 border border-green-600 rounded ${isSubmitting ? 'opacity-50' : ''}`}>
                         {authMode === 'LOGIN' ? 'ログイン' : '登録'}
                       </button>
                     </div>
@@ -279,7 +292,7 @@
     // ==========================================
     // 対戦データ画面
     // ==========================================
-    const HistoryScreen = ({ onBack, loggedInUser }) => {
+    const HistoryScreen = ({ onBack, loggedInUser, matchHistory, onDeleteMatch }) => {
       const [historyData, setHistoryData] = useState([]);
       const [selectedMatch, setSelectedMatch] = useState(null);
       const [itemToDelete, setItemToDelete] = useState(null);
@@ -288,12 +301,10 @@
       const isLongPressRef = useRef(false);
 
       useEffect(() => {
-        const data = JSON.parse(localStorage.getItem('jpaMatchHistory') || '[]');
-        // ログインユーザーの試合のみをフィルタリングして表示
-        const filteredData = data.filter(m => m.p1.name === loggedInUser || m.p2.name === loggedInUser);
+        const filteredData = (matchHistory || []).filter(m => m.p1.name === loggedInUser || m.p2.name === loggedInUser);
         filteredData.sort((a, b) => b.startTime - a.startTime);
         setHistoryData(filteredData);
-      }, [loggedInUser]);
+      }, [loggedInUser, matchHistory]);
 
       const handleTouchStart = (match) => {
         isLongPressRef.current = false;
@@ -319,14 +330,13 @@
         setSelectedMatch(match);
       };
 
-      const handleDelete = () => {
+      const handleDelete = async () => {
         if (itemToDelete) {
-          const allData = JSON.parse(localStorage.getItem('jpaMatchHistory') || '[]');
-          const newAllData = allData.filter(m => m.startTime !== itemToDelete.startTime);
-          localStorage.setItem('jpaMatchHistory', JSON.stringify(newAllData));
-          
-          const newData = historyData.filter(m => m.startTime !== itemToDelete.startTime);
-          setHistoryData(newData);
+          const deleted = await onDeleteMatch(itemToDelete.startTime);
+          if (!deleted) {
+            alert('削除に失敗しました。');
+            return;
+          }
           setItemToDelete(null);
         }
       };
@@ -450,7 +460,7 @@
     // ==========================================
     // 個人データ画面
     // ==========================================
-    const PersonalDataScreen = ({ onBack, loggedInUser }) => {
+    const PersonalDataScreen = ({ onBack, loggedInUser, matchHistory }) => {
       const [stats, setStats] = useState({
         matches: 0,
         winRate: 0,
@@ -461,10 +471,19 @@
       });
 
       useEffect(() => {
-        const data = JSON.parse(localStorage.getItem('jpaMatchHistory') || '[]');
-        const userMatches = data.filter(m => m.p1.name === loggedInUser || m.p2.name === loggedInUser);
+        const userMatches = (matchHistory || []).filter(m => m.p1.name === loggedInUser || m.p2.name === loggedInUser);
         
-        if (userMatches.length === 0) return;
+        if (userMatches.length === 0) {
+          setStats({
+            matches: 0,
+            winRate: 0,
+            accuracy: 0,
+            maxRun: 0,
+            masuwari: 0,
+            graphData: []
+          });
+          return;
+        }
 
         let totalWins = 0;
         let totalPots = 0;
@@ -522,7 +541,7 @@
           graphData: gData
         });
 
-      }, [loggedInUser]);
+      }, [loggedInUser, matchHistory]);
 
       const drawGraph = () => {
         if (stats.graphData.length === 0) return null;
@@ -619,25 +638,20 @@
     // ==========================================
     // セットアップ画面
     // ==========================================
-    const SetupScreen = ({ onStart, onBack }) => {
+    const SetupScreen = ({ onStart, onBack, playerDict }) => {
       const [p1, setP1] = useState({ name: 'プレイヤー1', sl: 6 });
       const [p2, setP2] = useState({ name: 'プレイヤー2', sl: 4 });
-      const [playerDict, setPlayerDict] = useState({});
+      const safePlayerDict = playerDict || {};
       
       const [showDropdown1, setShowDropdown1] = useState(false);
       const [showDropdown2, setShowDropdown2] = useState(false);
 
-      useEffect(() => {
-        const dict = JSON.parse(localStorage.getItem('jpaPlayerDict') || '{}');
-        setPlayerDict(dict);
-      }, []);
-
       const handleSelectPlayer = (playerNum, name) => {
         if (playerNum === 1) {
-          setP1({ name, sl: playerDict[name] || p1.sl });
+          setP1({ name, sl: safePlayerDict[name] || p1.sl });
           setShowDropdown1(false);
         } else {
-          setP2({ name, sl: playerDict[name] || p2.sl });
+          setP2({ name, sl: safePlayerDict[name] || p2.sl });
           setShowDropdown2(false);
         }
       };
@@ -675,15 +689,15 @@
                 </button>
               </div>
               
-              {showDropdown1 && Object.keys(playerDict).length > 0 && (
+              {showDropdown1 && Object.keys(safePlayerDict).length > 0 && (
                 <ul className="absolute top-full left-24 right-0 mt-1 bg-[#1D5C45] border border-[#2A6552] rounded shadow-xl z-50 max-h-40 overflow-y-auto">
-                  {Object.keys(playerDict).map((name, i) => (
+                  {Object.keys(safePlayerDict).map((name, i) => (
                     <li 
                       key={i} 
                       onClick={() => handleSelectPlayer(1, name)}
                       className="px-3 py-2 border-b border-[#2A6552] last:border-b-0 active:bg-[#2A6552] cursor-pointer text-sm"
                     >
-                      {name} <span className="text-gray-400 ml-2">SL:{playerDict[name]}</span>
+                      {name} <span className="text-gray-400 ml-2">SL:{safePlayerDict[name]}</span>
                     </li>
                   ))}
                 </ul>
@@ -723,15 +737,15 @@
                 </button>
               </div>
               
-              {showDropdown2 && Object.keys(playerDict).length > 0 && (
+              {showDropdown2 && Object.keys(safePlayerDict).length > 0 && (
                 <ul className="absolute top-full left-24 right-0 mt-1 bg-[#1D5C45] border border-[#2A6552] rounded shadow-xl z-50 max-h-40 overflow-y-auto">
-                  {Object.keys(playerDict).map((name, i) => (
+                  {Object.keys(safePlayerDict).map((name, i) => (
                     <li 
                       key={i} 
                       onClick={() => handleSelectPlayer(2, name)}
                       className="px-3 py-2 border-b border-[#2A6552] last:border-b-0 active:bg-[#2A6552] cursor-pointer text-sm"
                     >
-                      {name} <span className="text-gray-400 ml-2">SL:{playerDict[name]}</span>
+                      {name} <span className="text-gray-400 ml-2">SL:{safePlayerDict[name]}</span>
                     </li>
                   ))}
                 </ul>
@@ -764,7 +778,7 @@
     // ==========================================
     // メイン試合画面
     // ==========================================
-    const MatchScreen = ({ p1Setup, p2Setup, onBack }) => {
+    const MatchScreen = ({ p1Setup, p2Setup, onBack, onSaveMatch }) => {
       const getInitialState = () => ({
         p1: { name: p1Setup.name, sl: p1Setup.sl, goal: SL_GOALS[p1Setup.sl], score: 0 },
         p2: { name: p2Setup.name, sl: p2Setup.sl, goal: SL_GOALS[p2Setup.sl], score: 0 },
@@ -946,7 +960,7 @@
         p2TeamPts = winner === 2 ? pts.winner : pts.loser;
       }
 
-      const handleSave = () => {
+      const handleSave = async () => {
         const matchData = {
           startTime,
           endTime,
@@ -956,20 +970,17 @@
           p1TeamPts,
           p2TeamPts,
           inning,
+          timeline,
           p1Stats,
           p2Stats
         };
-        const existingData = JSON.parse(localStorage.getItem('jpaMatchHistory') || '[]');
-        existingData.push(matchData);
-        localStorage.setItem('jpaMatchHistory', JSON.stringify(existingData));
-
-        const playerDict = JSON.parse(localStorage.getItem('jpaPlayerDict') || '{}');
-        playerDict[p1.name] = p1.sl;
-        playerDict[p2.name] = p2.sl;
-        localStorage.setItem('jpaPlayerDict', JSON.stringify(playerDict));
-
-        alert('試合結果を保存しました。');
-        onBack();
+        const saved = await onSaveMatch(matchData, p1, p2);
+        if (saved) {
+          alert('試合結果を保存しました。');
+          onBack();
+        } else {
+          alert('保存に失敗しました。');
+        }
       };
 
       const StatRow = ({ label, v1, v2 }) => (
@@ -1174,9 +1185,99 @@
       const [view, setView] = useState('HOME');
       const [p1Setup, setP1Setup] = useState(null);
       const [p2Setup, setP2Setup] = useState(null);
-      
-      // ログイン状態の管理
-      const [loggedInUser, setLoggedInUser] = useState(localStorage.getItem('jpaLoggedInUser') || '');
+      const [loggedInUser, setLoggedInUser] = useState(localStorage.getItem(SESSION_USER_KEY) || '');
+      const [sessionToken, setSessionToken] = useState(localStorage.getItem(SESSION_TOKEN_KEY) || '');
+      const [userData, setUserData] = useState(EMPTY_USER_DATA);
+      const [isLoadingSession, setIsLoadingSession] = useState(true);
+
+      const clearSession = () => {
+        localStorage.removeItem(SESSION_USER_KEY);
+        localStorage.removeItem(SESSION_TOKEN_KEY);
+        setLoggedInUser('');
+        setSessionToken('');
+        setUserData(EMPTY_USER_DATA);
+      };
+
+      useEffect(() => {
+        const restoreSession = async () => {
+          if (!sessionToken) {
+            setIsLoadingSession(false);
+            return;
+          }
+          try {
+            const result = await apiRequest('/api/session', {
+              headers: { Authorization: 'Token ' + sessionToken }
+            });
+            setLoggedInUser(result.name || '');
+            setUserData(result.data || EMPTY_USER_DATA);
+          } catch (_error) {
+            clearSession();
+          } finally {
+            setIsLoadingSession(false);
+          }
+        };
+        restoreSession();
+      }, [sessionToken]);
+
+      const handleAuthSuccess = (result) => {
+        const name = result.name || '';
+        const token = result.token || '';
+        localStorage.setItem(SESSION_USER_KEY, name);
+        localStorage.setItem(SESSION_TOKEN_KEY, token);
+        setLoggedInUser(name);
+        setSessionToken(token);
+        setUserData(result.data || EMPTY_USER_DATA);
+      };
+
+      const handleLogout = async () => {
+        const token = sessionToken;
+        clearSession();
+        if (token) {
+          try {
+            await apiRequest('/api/auth/logout', {
+              method: 'POST',
+              headers: { Authorization: 'Token ' + token }
+            });
+          } catch (_error) {
+            // ignore logout API failure
+          }
+        }
+      };
+
+      const saveUserData = async (nextData) => {
+        if (!sessionToken) return false;
+        try {
+          await apiRequest('/api/user-data', {
+            method: 'PUT',
+            headers: { Authorization: 'Token ' + sessionToken },
+            body: JSON.stringify(nextData)
+          });
+          setUserData(nextData);
+          return true;
+        } catch (_error) {
+          return false;
+        }
+      };
+
+      const handleSaveMatch = async (matchData, p1, p2) => {
+        const nextData = {
+          matchHistory: [...(userData.matchHistory || []), matchData],
+          playerDict: {
+            ...(userData.playerDict || {}),
+            [p1.name]: p1.sl,
+            [p2.name]: p2.sl
+          }
+        };
+        return saveUserData(nextData);
+      };
+
+      const handleDeleteMatch = async (startTime) => {
+        const nextData = {
+          matchHistory: (userData.matchHistory || []).filter(m => m.startTime !== startTime),
+          playerDict: userData.playerDict || {}
+        };
+        return saveUserData(nextData);
+      };
 
       const handleStartMatch = (p1, p2) => {
         setP1Setup(p1);
@@ -1188,13 +1289,15 @@
         setView('HOME');
       };
 
+      if (isLoadingSession) return null;
+
       return (
         <>
-          {view === 'HOME' && <HomeScreen onNewMatch={() => setView('SETUP')} onViewMatchData={() => setView('HISTORY')} onViewPersonalData={() => setView('PERSONAL_DATA')} loggedInUser={loggedInUser} setLoggedInUser={setLoggedInUser} />}
-          {view === 'SETUP' && <SetupScreen onStart={handleStartMatch} onBack={() => setView('HOME')} />}
-          {view === 'MATCH' && <MatchScreen p1Setup={p1Setup} p2Setup={p2Setup} onBack={handleBackToSetup} />}
-          {view === 'HISTORY' && <HistoryScreen onBack={() => setView('HOME')} loggedInUser={loggedInUser} />}
-          {view === 'PERSONAL_DATA' && <PersonalDataScreen onBack={() => setView('HOME')} loggedInUser={loggedInUser} />}
+          {view === 'HOME' && <HomeScreen onNewMatch={() => setView('SETUP')} onViewMatchData={() => setView('HISTORY')} onViewPersonalData={() => setView('PERSONAL_DATA')} loggedInUser={loggedInUser} onAuthSuccess={handleAuthSuccess} onLogout={handleLogout} />}
+          {view === 'SETUP' && <SetupScreen onStart={handleStartMatch} onBack={() => setView('HOME')} playerDict={userData.playerDict || {}} />}
+          {view === 'MATCH' && <MatchScreen p1Setup={p1Setup} p2Setup={p2Setup} onBack={handleBackToSetup} onSaveMatch={handleSaveMatch} />}
+          {view === 'HISTORY' && <HistoryScreen onBack={() => setView('HOME')} loggedInUser={loggedInUser} matchHistory={userData.matchHistory || []} onDeleteMatch={handleDeleteMatch} />}
+          {view === 'PERSONAL_DATA' && <PersonalDataScreen onBack={() => setView('HOME')} loggedInUser={loggedInUser} matchHistory={userData.matchHistory || []} />}
         </>
       );
     };
