@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>JPA Match App - Refined Flow</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
   <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -23,45 +24,24 @@
 
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
-    const SESSION_USER_KEY = 'jpaLoggedInUser';
-    const SESSION_TOKEN_KEY = 'jpaSessionToken';
+
+    // =====================================================
+    // Supabase 設定 - あなたのプロジェクトの値に置き換えてください
+    // Supabase プロジェクト URL と anon key は
+    // https://app.supabase.com のプロジェクト設定 > API で確認できます
+    // =====================================================
+    const SUPABASE_URL = 'YOUR_SUPABASE_PROJECT_URL';
+    const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+    // =====================================================
+
+    const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     const EMPTY_USER_DATA = { matchHistory: [], playerDict: {} };
 
-    const apiRequest = async (path, options = {}) => {
-      const INVALID_RESPONSE_ERROR = 'サーバー応答の形式が不正です。アプリをサーバー経由で開いてください。';
-      const response = await fetch(path, {
-        ...options,
-        headers: {
-          'Content-Type': 'application/json',
-          ...(options.headers || {})
-        }
-      });
-      const text = await response.text();
-      const contentType = (response.headers.get('content-type') || '').toLowerCase();
-      const isJson = contentType.includes('application/json');
-      let data = {};
-
-      if (text && isJson) {
-        try {
-          data = JSON.parse(text);
-        } catch (_error) {
-          throw new Error(INVALID_RESPONSE_ERROR);
-        }
-      }
-
-      if (!response.ok) {
-        if (typeof data.error === 'string' && data.error) throw new Error(data.error);
-        if (!isJson && text) {
-          throw new Error(INVALID_RESPONSE_ERROR);
-        }
-        throw new Error('通信に失敗しました。');
-      }
-
-      if (!isJson && text) {
-        throw new Error(INVALID_RESPONSE_ERROR);
-      }
-
-      return data;
+    // プレイヤー名を Supabase auth 用の合成メールアドレスに変換する
+    const nameToEmail = (name) => {
+      const encoded = btoa(unescape(encodeURIComponent(name.trim())))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+      return `u_${encoded}@jpa-scoreboard.app`;
     };
 
     // --- 日時フォーマット関数 ---
@@ -160,22 +140,51 @@
       const [isSubmitting, setIsSubmitting] = useState(false);
 
       const handleAuth = async () => {
-        if (!authName || authPin.length !== 4) {
+        if (!authName.trim() || authPin.length !== 4) {
           alert('名前と4桁の数字パスワードを入力してください。');
           return;
         }
 
         setIsSubmitting(true);
         try {
-          const endpoint = authMode === 'REGISTER' ? '/api/auth/register' : '/api/auth/login';
-          const result = await apiRequest(endpoint, {
-            method: 'POST',
-            body: JSON.stringify({ name: authName, pin: authPin })
-          });
-          onAuthSuccess(result);
-          setShowAuthModal(false);
+          const email = nameToEmail(authName);
+          const trimmedName = authName.trim();
+
           if (authMode === 'REGISTER') {
+            const { data, error } = await _supabase.auth.signUp({
+              email,
+              password: authPin,
+              options: { data: { display_name: trimmedName } }
+            });
+            if (error) {
+              if (error.message.includes('already registered') || error.message.includes('already been registered')) {
+                throw new Error('この名前は既に登録されています。');
+              }
+              throw new Error(error.message);
+            }
+            if (data.user && !data.session) {
+              throw new Error('メール確認が必要です。Supabaseダッシュボードの Authentication > Settings でメール確認を無効にしてください。');
+            }
+            await _supabase.from('user_data').upsert({ id: data.user.id, match_history: [], player_dict: {} });
+            onAuthSuccess({ name: trimmedName, data: EMPTY_USER_DATA });
+            setShowAuthModal(false);
             alert('登録が完了し、ログインしました。');
+          } else {
+            const { data, error } = await _supabase.auth.signInWithPassword({ email, password: authPin });
+            if (error) throw new Error('プレイヤー名またはパスワードが間違っています。');
+            const { data: dbData } = await _supabase
+              .from('user_data')
+              .select('match_history, player_dict')
+              .eq('id', data.user.id)
+              .single();
+            onAuthSuccess({
+              name: trimmedName,
+              data: {
+                matchHistory: dbData?.match_history || [],
+                playerDict: dbData?.player_dict || {}
+              }
+            });
+            setShowAuthModal(false);
           }
         } catch (error) {
           alert(error.message);
@@ -1206,31 +1215,32 @@
       const [view, setView] = useState('HOME');
       const [p1Setup, setP1Setup] = useState(null);
       const [p2Setup, setP2Setup] = useState(null);
-      const [loggedInUser, setLoggedInUser] = useState(localStorage.getItem(SESSION_USER_KEY) || '');
-      const [sessionToken, setSessionToken] = useState(localStorage.getItem(SESSION_TOKEN_KEY) || '');
+      const [loggedInUser, setLoggedInUser] = useState('');
       const [userData, setUserData] = useState(EMPTY_USER_DATA);
       const [isLoadingSession, setIsLoadingSession] = useState(true);
 
       const clearSession = () => {
-        localStorage.removeItem(SESSION_USER_KEY);
-        localStorage.removeItem(SESSION_TOKEN_KEY);
         setLoggedInUser('');
-        setSessionToken('');
         setUserData(EMPTY_USER_DATA);
       };
 
       useEffect(() => {
         const restoreSession = async () => {
-          if (!sessionToken) {
-            setIsLoadingSession(false);
-            return;
-          }
           try {
-            const result = await apiRequest('/api/session', {
-              headers: { Authorization: 'Token ' + sessionToken }
-            });
-            setLoggedInUser(result.name || '');
-            setUserData(result.data || EMPTY_USER_DATA);
+            const { data: { session } } = await _supabase.auth.getSession();
+            if (session) {
+              const name = session.user.user_metadata?.display_name || '';
+              setLoggedInUser(name);
+              const { data: dbData } = await _supabase
+                .from('user_data')
+                .select('match_history, player_dict')
+                .eq('id', session.user.id)
+                .single();
+              setUserData({
+                matchHistory: dbData?.match_history || [],
+                playerDict: dbData?.player_dict || {}
+              });
+            }
           } catch (_error) {
             clearSession();
           } finally {
@@ -1238,41 +1248,31 @@
           }
         };
         restoreSession();
-      }, [sessionToken]);
+      }, []);
 
-      const handleAuthSuccess = (result) => {
-        const name = result.name || '';
-        const token = result.token || '';
-        localStorage.setItem(SESSION_USER_KEY, name);
-        localStorage.setItem(SESSION_TOKEN_KEY, token);
-        setLoggedInUser(name);
-        setSessionToken(token);
-        setUserData(result.data || EMPTY_USER_DATA);
+      const handleAuthSuccess = ({ name, data }) => {
+        setLoggedInUser(name || '');
+        setUserData(data || EMPTY_USER_DATA);
       };
 
       const handleLogout = async () => {
-        const token = sessionToken;
         clearSession();
-        if (token) {
-          try {
-            await apiRequest('/api/auth/logout', {
-              method: 'POST',
-              headers: { Authorization: 'Token ' + token }
-            });
-          } catch (_error) {
-            // ignore logout API failure
-          }
-        }
+        await _supabase.auth.signOut();
       };
 
       const saveUserData = async (nextData) => {
-        if (!sessionToken) return false;
+        const { data: { session } } = await _supabase.auth.getSession();
+        if (!session) return false;
         try {
-          await apiRequest('/api/user-data', {
-            method: 'PUT',
-            headers: { Authorization: 'Token ' + sessionToken },
-            body: JSON.stringify(nextData)
-          });
+          const { error } = await _supabase
+            .from('user_data')
+            .upsert({
+              id: session.user.id,
+              match_history: nextData.matchHistory,
+              player_dict: nextData.playerDict,
+              updated_at: new Date().toISOString()
+            });
+          if (error) throw error;
           setUserData(nextData);
           return true;
         } catch (_error) {
