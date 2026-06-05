@@ -1,4 +1,5 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -10,26 +11,29 @@ const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 app.use(express.json({ limit: '1mb' }));
 
-const createRateLimiter = (maxRequests, windowMs) => {
-  const requestMap = new Map();
-  return (req, res, next) => {
-    const key = req.ip || req.connection.remoteAddress || 'unknown';
-    const now = Date.now();
-    const entry = requestMap.get(key);
-    if (!entry || now > entry.resetAt) {
-      requestMap.set(key, { count: 1, resetAt: now + windowMs });
-      return next();
-    }
-    entry.count += 1;
-    if (entry.count > maxRequests) {
-      return res.status(429).json({ error: 'アクセスが多すぎます。しばらく待って再試行してください。' });
-    }
-    return next();
-  };
-};
+app.use(rateLimit({
+  windowMs: 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'アクセスが多すぎます。しばらく待って再試行してください。' }
+}));
 
-app.use('/api', createRateLimiter(120, 60 * 1000));
-app.use('/api/auth', createRateLimiter(30, 60 * 1000));
+app.use('/api', rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'アクセスが多すぎます。しばらく待って再試行してください。' }
+}));
+
+app.use('/api/auth', rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'アクセスが多すぎます。しばらく待って再試行してください。' }
+}));
 
 const ensureDb = () => {
   const dir = path.dirname(DB_PATH);
@@ -230,6 +234,7 @@ app.get('/jpa-score.html', (_req, res) => {
   res.sendFile(path.join(__dirname, 'jpa-score.html'));
 });
 
+ensureDb();
 app.listen(PORT, () => {
   console.log(`JPA scoreboard server listening on http://localhost:${PORT}`);
 });
