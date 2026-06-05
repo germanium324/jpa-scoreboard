@@ -39,7 +39,10 @@
 
     // プレイヤー名を Supabase auth 用の合成メールアドレスに変換する
     const nameToEmail = (name) => {
-      const encoded = btoa(unescape(encodeURIComponent(name.trim())))
+      const bytes = new TextEncoder().encode(name.trim());
+      let binary = '';
+      bytes.forEach(b => { binary += String.fromCharCode(b); });
+      const encoded = btoa(binary)
         .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
       return `u_${encoded}@jpa-scoreboard.app`;
     };
@@ -140,7 +143,7 @@
       const [isSubmitting, setIsSubmitting] = useState(false);
 
       const handleAuth = async () => {
-        if (!authName.trim() || authPin.length !== 4) {
+        if (!authName.trim() || !/^\d{4}$/.test(authPin)) {
           alert('名前と4桁の数字パスワードを入力してください。');
           return;
         }
@@ -157,7 +160,7 @@
               options: { data: { display_name: trimmedName } }
             });
             if (error) {
-              if (error.message.includes('already registered') || error.message.includes('already been registered')) {
+              if (error.code === 'user_already_exists' || error.message.toLowerCase().includes('already registered')) {
                 throw new Error('この名前は既に登録されています。');
               }
               throw new Error(error.message);
@@ -165,7 +168,13 @@
             if (data.user && !data.session) {
               throw new Error('メール確認が必要です。Supabaseダッシュボードの Authentication > Settings でメール確認を無効にしてください。');
             }
-            await _supabase.from('user_data').upsert({ id: data.user.id, match_history: [], player_dict: {} });
+            const { error: upsertError } = await _supabase
+              .from('user_data')
+              .upsert({ id: data.user.id, match_history: [], player_dict: {} });
+            if (upsertError) {
+              await _supabase.auth.signOut();
+              throw new Error('ユーザーデータの作成に失敗しました。もう一度お試しください。');
+            }
             onAuthSuccess({ name: trimmedName, data: EMPTY_USER_DATA });
             setShowAuthModal(false);
             alert('登録が完了し、ログインしました。');
@@ -1324,7 +1333,21 @@
     };
 
     const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
+    if (SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL' || SUPABASE_ANON_KEY === 'YOUR_SUPABASE_ANON_KEY') {
+      root.render(
+        <div className="flex flex-col items-center justify-center h-screen bg-[#0F4C3A] text-white text-center p-8">
+          <p className="text-5xl mb-4">⚠️</p>
+          <h2 className="text-xl font-bold mb-4">Supabase の設定が必要です</h2>
+          <p className="text-sm text-gray-300 leading-relaxed">
+            jpa-score.html の <strong>SUPABASE_URL</strong> と <strong>SUPABASE_ANON_KEY</strong> を<br />
+            実際のプロジェクトの値に置き換えてください。
+          </p>
+          <p className="text-xs text-gray-400 mt-4">詳しくは supabase-setup.sql のコメントを参照してください。</p>
+        </div>
+      );
+    } else {
+      root.render(<App />);
+    }
   </script>
 </body>
 </html>
