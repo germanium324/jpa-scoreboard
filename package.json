@@ -1,0 +1,12 @@
+{
+  "name": "jpa-scoreboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "JPA scoreboard with server-side player sync",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
