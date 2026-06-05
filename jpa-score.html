@@ -28,6 +28,7 @@
     const EMPTY_USER_DATA = { matchHistory: [], playerDict: {} };
 
     const apiRequest = async (path, options = {}) => {
+      const INVALID_RESPONSE_ERROR = 'サーバー応答の形式が不正です。アプリをサーバー経由で開いてください。';
       const response = await fetch(path, {
         ...options,
         headers: {
@@ -38,15 +39,26 @@
       const text = await response.text();
       const contentType = (response.headers.get('content-type') || '').toLowerCase();
       const isJson = contentType.includes('application/json');
-      const data = text && isJson ? JSON.parse(text) : {};
+      let data = {};
+
+      if (text && isJson) {
+        try {
+          data = JSON.parse(text);
+        } catch (_error) {
+          throw new Error(INVALID_RESPONSE_ERROR);
+        }
+      }
 
       if (!response.ok) {
-        if (data && data.error) throw new Error(data.error);
+        if (typeof data.error === 'string' && data.error) throw new Error(data.error);
+        if (!isJson && text) {
+          throw new Error(INVALID_RESPONSE_ERROR);
+        }
         throw new Error('通信に失敗しました。');
       }
 
       if (!isJson && text) {
-        throw new Error('サーバー応答の形式が不正です。アプリをサーバー経由で開いてください。');
+        throw new Error(INVALID_RESPONSE_ERROR);
       }
 
       return data;
