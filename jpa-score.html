@@ -32,9 +32,14 @@
     // =====================================================
     const SUPABASE_URL = 'YOUR_SUPABASE_PROJECT_URL';
     const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+    const isSupabaseConfigured =
+      SUPABASE_URL !== 'YOUR_SUPABASE_PROJECT_URL' &&
+      SUPABASE_ANON_KEY !== 'YOUR_SUPABASE_ANON_KEY';
     // =====================================================
 
-    const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const _supabase = isSupabaseConfigured
+      ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+      : null;
     const EMPTY_USER_DATA = { matchHistory: [], playerDict: {} };
 
     // プレイヤー名を Supabase auth 用の合成メールアドレスに変換する
@@ -1333,7 +1338,7 @@
     };
 
     const root = ReactDOM.createRoot(document.getElementById('root'));
-    if (SUPABASE_URL === 'YOUR_SUPABASE_PROJECT_URL' || SUPABASE_ANON_KEY === 'YOUR_SUPABASE_ANON_KEY') {
+    if (!isSupabaseConfigured) {
       root.render(
         <div className="flex flex-col items-center justify-center h-screen bg-[#0F4C3A] text-white text-center p-8">
           <p className="text-5xl mb-4">⚠️</p>
