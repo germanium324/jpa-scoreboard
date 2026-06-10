@@ -54,6 +54,47 @@
 
     const pinToPassword = (pin) => `jpa-pin-${pin}`;
 
+    const createTransientClient = () => window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false
+      }
+    });
+
+    const toSkill = (value, fallback) => {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return fallback;
+      return Math.min(9, Math.max(1, Math.round(num)));
+    };
+
+    const getLatestSkillForPlayer = (playerName, data, fallback) => {
+      if (!playerName) return fallback;
+      const safeData = data || EMPTY_USER_DATA;
+      const history = Array.isArray(safeData.matchHistory) ? safeData.matchHistory : [];
+      let latestTs = -1;
+      let latestSkill = null;
+
+      history.forEach((match) => {
+        if (!match || typeof match !== 'object') return;
+        const ts = Number(match.endTime || match.startTime || 0);
+        const p1 = match.p1 || {};
+        const p2 = match.p2 || {};
+        if (p1.name === playerName && Number.isFinite(Number(p1.sl)) && ts >= latestTs) {
+          latestTs = ts;
+          latestSkill = Number(p1.sl);
+        }
+        if (p2.name === playerName && Number.isFinite(Number(p2.sl)) && ts >= latestTs) {
+          latestTs = ts;
+          latestSkill = Number(p2.sl);
+        }
+      });
+
+      if (latestSkill !== null) return toSkill(latestSkill, fallback);
+      const dictSkill = safeData.playerDict && safeData.playerDict[playerName];
+      return toSkill(dictSkill, fallback);
+    };
+
     // --- 日時フォーマット関数 ---
     const formatTime = (ts) => {
       if (!ts) return '';
@@ -685,13 +726,29 @@
     // ==========================================
     // セットアップ画面
     // ==========================================
-    const SetupScreen = ({ onStart, onBack, playerDict }) => {
-      const [p1, setP1] = useState({ name: 'プレイヤー1', sl: 6 });
-      const [p2, setP2] = useState({ name: 'プレイヤー2', sl: 4 });
+    const SetupScreen = ({ onStart, onBack, playerDict, initialP1, initialP2 }) => {
+      const normalizedP1 = {
+        name: initialP1?.name || 'プレイヤー1',
+        sl: toSkill(initialP1?.sl, 6)
+      };
+      const normalizedP2 = {
+        name: initialP2?.name || 'プレイヤー2',
+        sl: toSkill(initialP2?.sl, 4)
+      };
+      const [p1, setP1] = useState(normalizedP1);
+      const [p2, setP2] = useState(normalizedP2);
       const safePlayerDict = playerDict || {};
       
       const [showDropdown1, setShowDropdown1] = useState(false);
       const [showDropdown2, setShowDropdown2] = useState(false);
+
+      useEffect(() => {
+        setP1(normalizedP1);
+      }, [normalizedP1.name, normalizedP1.sl]);
+
+      useEffect(() => {
+        setP2(normalizedP2);
+      }, [normalizedP2.name, normalizedP2.sl]);
 
       const handleSelectPlayer = (playerNum, name) => {
         if (playerNum === 1) {
@@ -701,6 +758,89 @@
           setP2({ name, sl: safePlayerDict[name] || p2.sl });
           setShowDropdown2(false);
         }
+      };
+
+      const MatchTypeScreen = ({ onBack, onGuest, onRegistered }) => (
+        <div className="flex flex-col h-screen max-w-md mx-auto bg-[#0F4C3A] p-6">
+          <header className="flex items-center mb-8 pb-4 border-b border-[#2A6552]">
+            <span className="text-xl mr-4 cursor-pointer" onClick={onBack}>&lt; 戻る</span>
+            <h1 className="text-xl font-bold">対戦相手を選択</h1>
+          </header>
+          <div className="flex-1 flex flex-col justify-center gap-6">
+            <button
+              onClick={onGuest}
+              className="w-full bg-[#1A6E4F] border border-white py-5 rounded-xl text-xl font-bold shadow-lg active:scale-95 transition-transform"
+            >
+              ゲストと対戦
+            </button>
+            <button
+              onClick={onRegistered}
+              className="w-full bg-[#2A6552] border border-white py-5 rounded-xl text-xl font-bold shadow-lg active:scale-95 transition-transform"
+            >
+              登録ユーザーと対戦
+            </button>
+          </div>
+        </div>
+      );
+
+      const OpponentAuthScreen = ({ onBack, onSubmit }) => {
+        const [name, setName] = useState('');
+        const [pin, setPin] = useState('');
+        const [isSubmitting, setIsSubmitting] = useState(false);
+
+        const handleSubmit = async () => {
+          if (!name.trim() || !/^\d{4}$/.test(pin)) {
+            alert('対戦相手の名前と4桁の数字パスワードを入力してください。');
+            return;
+          }
+          setIsSubmitting(true);
+          try {
+            const ok = await onSubmit(name.trim(), pin);
+            if (!ok) return;
+          } finally {
+            setIsSubmitting(false);
+          }
+        };
+
+        return (
+          <div className="flex flex-col h-screen max-w-md mx-auto bg-[#0F4C3A] p-6">
+            <header className="flex items-center mb-8 pb-4 border-b border-[#2A6552]">
+              <span className="text-xl mr-4 cursor-pointer" onClick={onBack}>&lt; 戻る</span>
+              <h1 className="text-xl font-bold">登録ユーザーと対戦</h1>
+            </header>
+            <div className="bg-[#1D5C45] border border-[#2A6552] rounded-xl p-5">
+              <p className="text-sm text-gray-200 mb-5">対戦相手の名前とパスワードを入力してください。</p>
+              <div className="mb-4">
+                <label className="block text-sm mb-1 text-gray-200">対戦相手の名前</label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full bg-transparent border border-gray-400 rounded px-3 py-2 outline-none focus:border-green-400"
+                  placeholder="名前を入力"
+                />
+              </div>
+              <div className="mb-5">
+                <label className="block text-sm mb-1 text-gray-200">パスワード（数字4桁）</label>
+                <input
+                  type="password"
+                  maxLength="4"
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value.replace(/[^\d]/g, '').slice(0, 4))}
+                  className="w-full bg-transparent border border-gray-400 rounded px-3 py-2 outline-none focus:border-green-400"
+                  placeholder="1234"
+                />
+              </div>
+              <button
+                onClick={handleSubmit}
+                disabled={isSubmitting}
+                className={`w-full bg-[#1A6E4F] border border-white py-3 rounded-xl font-bold ${isSubmitting ? 'opacity-50' : 'active:scale-95'}`}
+              >
+                入力完了
+              </button>
+            </div>
+          </div>
+        );
       };
 
       const SearchIcon = () => (
@@ -1235,6 +1375,8 @@
       const [loggedInUser, setLoggedInUser] = useState('');
       const [userData, setUserData] = useState(EMPTY_USER_DATA);
       const [isLoadingSession, setIsLoadingSession] = useState(true);
+      const [matchMode, setMatchMode] = useState('GUEST');
+      const [registeredOpponent, setRegisteredOpponent] = useState(null);
 
       const clearSession = () => {
         setLoggedInUser('');
@@ -1306,7 +1448,47 @@
             [p2.name]: p2.sl
           }
         };
-        return saveUserData(nextData);
+        const saved = await saveUserData(nextData);
+        if (!saved) return false;
+        if (matchMode !== 'REGISTERED' || !registeredOpponent) return true;
+
+        try {
+          const transientClient = createTransientClient();
+          const { data: authData, error: authError } = await transientClient.auth.signInWithPassword({
+            email: nameToEmail(registeredOpponent.name),
+            password: pinToPassword(registeredOpponent.pin)
+          });
+          if (authError || !authData?.user) throw new Error('対戦相手の認証に失敗しました。');
+
+          const { data: opponentData } = await transientClient
+            .from('user_data')
+            .select('match_history, player_dict')
+            .eq('id', authData.user.id)
+            .single();
+
+          const nextOpponentData = {
+            matchHistory: [...(opponentData?.match_history || []), matchData],
+            playerDict: {
+              ...(opponentData?.player_dict || {}),
+              [p1.name]: p1.sl,
+              [p2.name]: p2.sl
+            }
+          };
+
+          const { error: upsertError } = await transientClient
+            .from('user_data')
+            .upsert({
+              id: authData.user.id,
+              match_history: nextOpponentData.matchHistory,
+              player_dict: nextOpponentData.playerDict,
+              updated_at: new Date().toISOString()
+            });
+          await transientClient.auth.signOut();
+          if (upsertError) throw upsertError;
+          return true;
+        } catch (_error) {
+          return false;
+        }
       };
 
       const handleDeleteMatch = async (startTime) => {
@@ -1323,6 +1505,66 @@
         setView('MATCH');
       };
 
+      const handleOpenNewMatch = () => {
+        setMatchMode('GUEST');
+        setRegisteredOpponent(null);
+        setView('MATCH_TYPE');
+      };
+
+      const handleSelectGuestMatch = () => {
+        setMatchMode('GUEST');
+        setRegisteredOpponent(null);
+        setView('SETUP');
+      };
+
+      const handleSelectRegisteredMatch = () => {
+        if (!loggedInUser) {
+          alert('登録ユーザーと対戦を選ぶにはログインしてください。');
+          return;
+        }
+        setView('OPPONENT_AUTH');
+      };
+
+      const handleRegisteredOpponentSubmit = async (opponentName, opponentPin) => {
+        if (!loggedInUser) {
+          alert('先にログインしてください。');
+          return false;
+        }
+        if (opponentName === loggedInUser) {
+          alert('対戦相手には別の登録ユーザーを入力してください。');
+          return false;
+        }
+        try {
+          const transientClient = createTransientClient();
+          const { data: authData, error: authError } = await transientClient.auth.signInWithPassword({
+            email: nameToEmail(opponentName),
+            password: pinToPassword(opponentPin)
+          });
+          if (authError || !authData?.user) throw new Error('対戦相手の名前またはパスワードが間違っています。');
+
+          const { data: opponentData, error: selectError } = await transientClient
+            .from('user_data')
+            .select('match_history, player_dict')
+            .eq('id', authData.user.id)
+            .single();
+          await transientClient.auth.signOut();
+          if (selectError) throw selectError;
+
+          const opponentSkill = getLatestSkillForPlayer(opponentName, {
+            matchHistory: opponentData?.match_history || [],
+            playerDict: opponentData?.player_dict || {}
+          }, 4);
+
+          setRegisteredOpponent({ name: opponentName, pin: opponentPin, sl: opponentSkill });
+          setMatchMode('REGISTERED');
+          setView('SETUP');
+          return true;
+        } catch (error) {
+          alert(error.message || '対戦相手の認証に失敗しました。');
+          return false;
+        }
+      };
+
       const handleBackToSetup = () => {
         setView('HOME');
       };
@@ -1331,8 +1573,19 @@
 
       return (
         <>
-          {view === 'HOME' && <HomeScreen onNewMatch={() => setView('SETUP')} onViewMatchData={() => setView('HISTORY')} onViewPersonalData={() => setView('PERSONAL_DATA')} loggedInUser={loggedInUser} onAuthSuccess={handleAuthSuccess} onLogout={handleLogout} />}
-          {view === 'SETUP' && <SetupScreen onStart={handleStartMatch} onBack={() => setView('HOME')} playerDict={userData.playerDict || {}} />}
+          {view === 'HOME' && <HomeScreen onNewMatch={handleOpenNewMatch} onViewMatchData={() => setView('HISTORY')} onViewPersonalData={() => setView('PERSONAL_DATA')} loggedInUser={loggedInUser} onAuthSuccess={handleAuthSuccess} onLogout={handleLogout} />}
+          {view === 'MATCH_TYPE' && <MatchTypeScreen onBack={() => setView('HOME')} onGuest={handleSelectGuestMatch} onRegistered={handleSelectRegisteredMatch} />}
+          {view === 'OPPONENT_AUTH' && <OpponentAuthScreen onBack={() => setView('MATCH_TYPE')} onSubmit={handleRegisteredOpponentSubmit} />}
+          {view === 'SETUP' && <SetupScreen onStart={handleStartMatch} onBack={() => setView('HOME')} playerDict={userData.playerDict || {}} initialP1={{
+            name: loggedInUser || 'プレイヤー1',
+            sl: loggedInUser ? getLatestSkillForPlayer(loggedInUser, userData, 6) : 6
+          }} initialP2={matchMode === 'REGISTERED' && registeredOpponent ? {
+            name: registeredOpponent.name,
+            sl: registeredOpponent.sl
+          } : {
+            name: 'プレイヤー2',
+            sl: 4
+          }} />}
           {view === 'MATCH' && <MatchScreen p1Setup={p1Setup} p2Setup={p2Setup} onBack={handleBackToSetup} onSaveMatch={handleSaveMatch} />}
           {view === 'HISTORY' && <HistoryScreen onBack={() => setView('HOME')} loggedInUser={loggedInUser} matchHistory={userData.matchHistory || []} onDeleteMatch={handleDeleteMatch} />}
           {view === 'PERSONAL_DATA' && <PersonalDataScreen onBack={() => setView('HOME')} loggedInUser={loggedInUser} matchHistory={userData.matchHistory || []} />}
