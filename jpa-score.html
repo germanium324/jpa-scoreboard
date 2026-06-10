@@ -52,6 +52,8 @@
       return `u_${encoded}@jpa-scoreboard.app`;
     };
 
+    const pinToPassword = (pin) => `jpa-pin-${pin}`;
+
     // --- 日時フォーマット関数 ---
     const formatTime = (ts) => {
       if (!ts) return '';
@@ -157,11 +159,12 @@
         try {
           const email = nameToEmail(authName);
           const trimmedName = authName.trim();
+          const password = pinToPassword(authPin);
 
           if (authMode === 'REGISTER') {
             const { data, error } = await _supabase.auth.signUp({
               email,
-              password: authPin,
+              password,
               options: { data: { display_name: trimmedName } }
             });
             if (error) {
@@ -184,7 +187,7 @@
             setShowAuthModal(false);
             alert('登録が完了し、ログインしました。');
           } else {
-            const { data, error } = await _supabase.auth.signInWithPassword({ email, password: authPin });
+            const { data, error } = await _supabase.auth.signInWithPassword({ email, password });
             if (error) throw new Error('プレイヤー名またはパスワードが間違っています。');
             const { data: dbData } = await _supabase
               .from('user_data')
