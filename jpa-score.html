@@ -41,6 +41,19 @@
       ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
       : null;
     const EMPTY_USER_DATA = { matchHistory: [], playerDict: {} };
+    const APP_STATE_KEY = 'jpa-scoreboard-app-state-v1';
+
+    const loadPersistedAppState = () => {
+      try {
+        const raw = window.sessionStorage.getItem(APP_STATE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return null;
+        return parsed;
+      } catch (_error) {
+        return null;
+      }
+    };
 
     // プレイヤー名を Supabase auth 用の合成メールアドレスに変換する
     const nameToEmail = (name) => {
@@ -380,13 +393,12 @@
     // ==========================================
     // 対戦データ画面
     // ==========================================
-    const HistoryScreen = ({ onBack, loggedInUser, matchHistory, onDeleteMatch }) => {
+    const HistoryScreen = ({ onBack, loggedInUser, matchHistory, onDeleteMatches }) => {
       const [historyData, setHistoryData] = useState([]);
       const [selectedMatch, setSelectedMatch] = useState(null);
-      const [itemToDelete, setItemToDelete] = useState(null);
-      
-      const timerRef = useRef(null);
-      const isLongPressRef = useRef(false);
+      const [isDeleteMode, setIsDeleteMode] = useState(false);
+      const [selectedForDelete, setSelectedForDelete] = useState([]);
+      const [isDeleting, setIsDeleting] = useState(false);
 
       useEffect(() => {
         const filteredData = (matchHistory || []).filter(m => m.p1.name === loggedInUser || m.p2.name === loggedInUser);
@@ -394,39 +406,43 @@
         setHistoryData(filteredData);
       }, [loggedInUser, matchHistory]);
 
-      const handleTouchStart = (match) => {
-        isLongPressRef.current = false;
-        timerRef.current = setTimeout(() => {
-          isLongPressRef.current = true;
-          setItemToDelete(match);
-        }, 600);
+      const toggleDeleteMode = () => {
+        setIsDeleteMode((prev) => {
+          const next = !prev;
+          if (!next) setSelectedForDelete([]);
+          return next;
+        });
       };
 
-      const handleTouchEnd = () => {
-        if (timerRef.current) clearTimeout(timerRef.current);
+      const toggleDeleteSelection = (startTime) => {
+        setSelectedForDelete((prev) => (
+          prev.includes(startTime)
+            ? prev.filter((ts) => ts !== startTime)
+            : [...prev, startTime]
+        ));
       };
 
-      const handleTouchMove = () => {
-        if (timerRef.current) clearTimeout(timerRef.current);
-      };
-
-      const handleClick = (e, match) => {
-        if (isLongPressRef.current) {
-          e.preventDefault();
+      const handleCardClick = (match) => {
+        if (isDeleteMode) {
+          toggleDeleteSelection(match.startTime);
           return;
         }
         setSelectedMatch(match);
       };
 
-      const handleDelete = async () => {
-        if (itemToDelete) {
-          const deleted = await onDeleteMatch(itemToDelete.startTime);
-          if (!deleted) {
-            alert('削除に失敗しました。');
-            return;
-          }
-          setItemToDelete(null);
+      const handleBulkDelete = async () => {
+        if (!selectedForDelete.length || isDeleting) return;
+        const shouldDelete = window.confirm(`${selectedForDelete.length}件のデータを削除しますか？`);
+        if (!shouldDelete) return;
+        setIsDeleting(true);
+        const deleted = await onDeleteMatches(selectedForDelete);
+        setIsDeleting(false);
+        if (!deleted) {
+          alert('削除に失敗しました。');
+          return;
         }
+        setSelectedForDelete([]);
+        setIsDeleteMode(false);
       };
 
       const StatRow = ({ label, v1, v2 }) => (
@@ -439,20 +455,7 @@
 
       return (
         <div className="flex flex-col h-screen max-w-md mx-auto bg-[#0F4C3A] text-white relative overflow-hidden">
-          
-          {itemToDelete && (
-            <div className="absolute inset-0 z-[60] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
-              <div className="bg-white text-gray-800 rounded-2xl w-full p-6 shadow-2xl relative text-center">
-                <p className="text-lg font-bold mb-6">データを削除しますか？</p>
-                <div className="flex justify-around">
-                  <button onClick={() => setItemToDelete(null)} className="text-blue-500 font-medium px-4 py-2">キャンセル</button>
-                  <button onClick={handleDelete} className="text-pink-500 font-medium px-4 py-2">削除</button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {selectedMatch && !itemToDelete && (
+          {selectedMatch && !isDeleteMode && (
             <div className="absolute inset-0 z-50 bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
               <div className="bg-white text-gray-800 rounded-3xl w-full p-6 shadow-2xl relative">
                 <div className="flex justify-between text-xs text-gray-400 mb-2 px-2">
@@ -496,27 +499,32 @@
             </div>
           )}
 
-          <header className="flex items-center p-4 border-b border-[#2A6552]">
-            <span className="text-xl mr-4 cursor-pointer" onClick={onBack}>&lt; 戻る</span>
+          <header className="flex items-center justify-between p-4 border-b border-[#2A6552]">
+            <span className="text-xl cursor-pointer" onClick={onBack}>&lt; 戻る</span>
             <h1 className="text-xl font-bold">対戦データ</h1>
+            <button
+              onClick={toggleDeleteMode}
+              className={`text-sm font-bold px-3 py-1 rounded border ${isDeleteMode ? 'border-gray-300 text-gray-200' : 'border-pink-400 text-pink-300'}`}
+            >
+              {isDeleteMode ? '完了' : '削除'}
+            </button>
           </header>
           
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${isDeleteMode ? 'pb-24' : ''}`}>
             {historyData.length === 0 ? (
               <p className="text-center text-gray-400 mt-10">保存された試合データはありません。</p>
             ) : (
               historyData.map((match, idx) => (
                 <div 
                   key={idx} 
-                  onClick={(e) => handleClick(e, match)}
-                  onTouchStart={() => handleTouchStart(match)}
-                  onTouchEnd={handleTouchEnd}
-                  onTouchMove={handleTouchMove}
-                  onMouseDown={() => handleTouchStart(match)}
-                  onMouseUp={handleTouchEnd}
-                  onMouseLeave={handleTouchEnd}
-                  className="bg-[#1D5C45] p-4 rounded-xl shadow-md border border-[#2A6552] cursor-pointer active:scale-[0.98] transition-transform"
+                  onClick={() => handleCardClick(match)}
+                  className={`relative bg-[#1D5C45] p-4 rounded-xl shadow-md border cursor-pointer active:scale-[0.98] transition-transform ${selectedForDelete.includes(match.startTime) ? 'border-pink-400' : 'border-[#2A6552]'}`}
                 >
+                  {isDeleteMode && (
+                    <div className="absolute top-3 right-3 pointer-events-none">
+                      <div className={`w-5 h-5 rounded-full border-2 ${selectedForDelete.includes(match.startTime) ? 'border-pink-300 bg-pink-400' : 'border-gray-200'}`} />
+                    </div>
+                  )}
                   <div className="flex justify-between text-xs text-gray-300 mb-3 border-b border-[#2A6552] pb-2 pointer-events-none">
                     <span>{formatDate(match.startTime)}</span>
                     <span>{formatTime(match.startTime)} - {formatTime(match.endTime)}</span>
@@ -541,6 +549,19 @@
               ))
             )}
           </div>
+
+          {isDeleteMode && (
+            <div className="absolute bottom-0 left-0 right-0 bg-[#0A3A2D] border-t border-[#2A6552] p-3 flex items-center gap-3">
+              <p className="text-sm text-gray-200 flex-1">選択中: {selectedForDelete.length}件</p>
+              <button
+                onClick={handleBulkDelete}
+                disabled={!selectedForDelete.length || isDeleting}
+                className={`px-4 py-2 rounded-lg font-bold ${selectedForDelete.length && !isDeleting ? 'bg-pink-500 text-white' : 'bg-gray-500 text-gray-200 opacity-70'}`}
+              >
+                {isDeleting ? '削除中...' : '選択削除'}
+              </button>
+            </div>
+          )}
         </div>
       );
     };
@@ -971,7 +992,7 @@
     // ==========================================
     // メイン試合画面
     // ==========================================
-    const MatchScreen = ({ p1Setup, p2Setup, onBack, onSaveMatch }) => {
+    const MatchScreen = ({ p1Setup, p2Setup, onBack, onSaveMatch, initialMatchState, onMatchStateChange }) => {
       const getInitialState = () => ({
         p1: { name: p1Setup.name, sl: p1Setup.sl, goal: SL_GOALS[p1Setup.sl], score: 0 },
         p2: { name: p2Setup.name, sl: p2Setup.sl, goal: SL_GOALS[p2Setup.sl], score: 0 },
@@ -991,17 +1012,23 @@
         endTime: null
       });
 
-      const [history, setHistory] = useState([getInitialState()]);
+      const [history, setHistory] = useState(() => [initialMatchState || getInitialState()]);
       const currentState = history[history.length - 1];
       const timelineRef = useRef(null);
       
       const [showExitWarning, setShowExitWarning] = useState(false);
+      const [isSaving, setIsSaving] = useState(false);
 
       useEffect(() => {
         if (timelineRef.current) {
           timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
         }
       }, [currentState.timeline]);
+
+      useEffect(() => {
+        if (!onMatchStateChange) return;
+        onMatchStateChange(currentState);
+      }, [currentState, onMatchStateChange]);
 
       const pushState = (newState) => {
         setHistory(prev => [...prev, newState]);
@@ -1154,6 +1181,8 @@
       }
 
       const handleSave = async () => {
+        if (isSaving) return;
+        setIsSaving(true);
         const matchData = {
           startTime,
           endTime,
@@ -1168,6 +1197,7 @@
           p2Stats
         };
         const saved = await onSaveMatch(matchData, p1, p2);
+        setIsSaving(false);
         if (saved) {
           alert('試合結果を保存しました。');
           onBack();
@@ -1261,8 +1291,8 @@
                 </div>
                 
                 <div className="flex justify-around mt-4 pt-2">
-                  <button onClick={handleSave} className="text-blue-500 font-medium text-lg px-8 py-2">保存</button>
-                  <button onClick={handleUndo} className="text-pink-500 font-medium text-lg px-8 py-2">cancel</button>
+                  <button onClick={handleSave} disabled={isSaving} className={`text-blue-500 font-medium text-lg px-8 py-2 transition-opacity ${isSaving ? 'opacity-40' : ''}`}>{isSaving ? '保存中...' : '保存'}</button>
+                  <button onClick={handleUndo} disabled={isSaving} className={`text-pink-500 font-medium text-lg px-8 py-2 ${isSaving ? 'opacity-40' : ''}`}>cancel</button>
                 </div>
               </div>
             </div>
@@ -1375,14 +1405,21 @@
     }
 
     const App = () => {
-      const [view, setView] = useState('HOME');
-      const [p1Setup, setP1Setup] = useState(null);
-      const [p2Setup, setP2Setup] = useState(null);
+      const persistedRef = useRef(loadPersistedAppState());
+      const persisted = persistedRef.current || {};
+      const initialView = (
+        persisted.view === 'MATCH' && (!persisted.p1Setup || !persisted.p2Setup)
+      ) ? 'HOME' : (persisted.view || 'HOME');
+
+      const [view, setView] = useState(initialView);
+      const [p1Setup, setP1Setup] = useState(persisted.p1Setup || null);
+      const [p2Setup, setP2Setup] = useState(persisted.p2Setup || null);
       const [loggedInUser, setLoggedInUser] = useState('');
       const [userData, setUserData] = useState(EMPTY_USER_DATA);
       const [isLoadingSession, setIsLoadingSession] = useState(true);
-      const [matchMode, setMatchMode] = useState('GUEST');
-      const [registeredOpponent, setRegisteredOpponent] = useState(null);
+      const [matchMode, setMatchMode] = useState(persisted.matchMode || 'GUEST');
+      const [registeredOpponent, setRegisteredOpponent] = useState(persisted.registeredOpponent || null);
+      const [matchSnapshot, setMatchSnapshot] = useState(persisted.matchSnapshot || null);
 
       const clearSession = () => {
         setLoggedInUser('');
@@ -1415,6 +1452,19 @@
         restoreSession();
       }, []);
 
+      useEffect(() => {
+        try {
+          window.sessionStorage.setItem(APP_STATE_KEY, JSON.stringify({
+            view,
+            p1Setup,
+            p2Setup,
+            matchMode,
+            registeredOpponent,
+            matchSnapshot
+          }));
+        } catch (_error) {}
+      }, [view, p1Setup, p2Setup, matchMode, registeredOpponent, matchSnapshot]);
+
       const handleAuthSuccess = ({ name, data }) => {
         setLoggedInUser(name || '');
         setUserData(data || EMPTY_USER_DATA);
@@ -1445,9 +1495,15 @@
         }
       };
 
+      const appendUniqueMatch = (historyList, matchData) => {
+        const safeHistory = Array.isArray(historyList) ? historyList : [];
+        if (safeHistory.some((m) => m.startTime === matchData.startTime)) return safeHistory;
+        return [...safeHistory, matchData];
+      };
+
       const handleSaveMatch = async (matchData, p1, p2) => {
         const nextData = {
-          matchHistory: [...(userData.matchHistory || []), matchData],
+          matchHistory: appendUniqueMatch(userData.matchHistory || [], matchData),
           playerDict: {
             ...(userData.playerDict || {}),
             [p1.name]: p1.sl,
@@ -1473,7 +1529,7 @@
             .single();
 
           const nextOpponentData = {
-            matchHistory: [...(opponentData?.match_history || []), matchData],
+            matchHistory: appendUniqueMatch(opponentData?.match_history || [], matchData),
             playerDict: {
               ...(opponentData?.player_dict || {}),
               [p1.name]: p1.sl,
@@ -1497,9 +1553,10 @@
         }
       };
 
-      const handleDeleteMatch = async (startTime) => {
+      const handleDeleteMatches = async (startTimes) => {
+        const target = Array.isArray(startTimes) ? startTimes : [];
         const nextData = {
-          matchHistory: (userData.matchHistory || []).filter(m => m.startTime !== startTime),
+          matchHistory: (userData.matchHistory || []).filter(m => !target.includes(m.startTime)),
           playerDict: userData.playerDict || {}
         };
         return saveUserData(nextData);
@@ -1508,6 +1565,7 @@
       const handleStartMatch = (p1, p2) => {
         setP1Setup(p1);
         setP2Setup(p2);
+        setMatchSnapshot(null);
         setView('MATCH');
       };
 
@@ -1572,6 +1630,7 @@
       };
 
       const handleBackToSetup = () => {
+        setMatchSnapshot(null);
         setView('HOME');
       };
 
@@ -1592,8 +1651,8 @@
             name: 'プレイヤー2',
             sl: 4
           }} />}
-          {view === 'MATCH' && <MatchScreen p1Setup={p1Setup} p2Setup={p2Setup} onBack={handleBackToSetup} onSaveMatch={handleSaveMatch} />}
-          {view === 'HISTORY' && <HistoryScreen onBack={() => setView('HOME')} loggedInUser={loggedInUser} matchHistory={userData.matchHistory || []} onDeleteMatch={handleDeleteMatch} />}
+          {view === 'MATCH' && <MatchScreen p1Setup={p1Setup} p2Setup={p2Setup} onBack={handleBackToSetup} onSaveMatch={handleSaveMatch} initialMatchState={matchSnapshot} onMatchStateChange={setMatchSnapshot} />}
+          {view === 'HISTORY' && <HistoryScreen onBack={() => setView('HOME')} loggedInUser={loggedInUser} matchHistory={userData.matchHistory || []} onDeleteMatches={handleDeleteMatches} />}
           {view === 'PERSONAL_DATA' && <PersonalDataScreen onBack={() => setView('HOME')} loggedInUser={loggedInUser} matchHistory={userData.matchHistory || []} />}
         </>
       );
