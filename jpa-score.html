@@ -1291,8 +1291,8 @@
                 </div>
                 
                 <div className="flex justify-around mt-4 pt-2">
-                  <button onClick={handleSave} disabled={isSaving} className={`text-blue-500 font-medium text-lg px-8 py-2 transition-opacity ${isSaving ? 'opacity-40' : ''}`}>{isSaving ? '保存中...' : '保存'}</button>
-                  <button onClick={handleUndo} disabled={isSaving} className={`text-pink-500 font-medium text-lg px-8 py-2 ${isSaving ? 'opacity-40' : ''}`}>cancel</button>
+                  <button onClick={handleSave} disabled={isSaving} aria-disabled={isSaving} className={`text-blue-500 font-medium text-lg px-8 py-2 transition-opacity ${isSaving ? 'opacity-40 cursor-not-allowed' : ''}`}>{isSaving ? '保存中...' : '保存'}</button>
+                  <button onClick={handleUndo} disabled={isSaving} aria-disabled={isSaving} className={`text-pink-500 font-medium text-lg px-8 py-2 ${isSaving ? 'opacity-40 cursor-not-allowed' : ''}`}>cancel</button>
                 </div>
               </div>
             </div>
