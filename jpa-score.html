@@ -196,12 +196,19 @@
     // ==========================================
     // ホーム画面
     // ==========================================
-    const HomeScreen = ({ onNewMatch, onViewMatchData, onViewPersonalData, loggedInUser, onAuthSuccess, onLogout }) => {
+    const HomeScreen = ({ onNewMatch, onViewMatchData, onViewPersonalData, loggedInUser, loggedInPin, onAuthSuccess, onLogout, onNameChangeSuccess, onPinChangeSuccess }) => {
       const [showAuthModal, setShowAuthModal] = useState(false);
       const [authMode, setAuthMode] = useState('LOGIN'); // 'LOGIN' or 'REGISTER'
       const [authName, setAuthName] = useState('');
       const [authPin, setAuthPin] = useState('');
       const [isSubmitting, setIsSubmitting] = useState(false);
+
+      // アカウント設定用の状態
+      const [settingsView, setSettingsView] = useState('MAIN'); // 'MAIN'|'SHOW_PIN'|'NAME'|'PIN'
+      const [newName, setNewName] = useState('');
+      const [newPin, setNewPin] = useState('');
+      const [showCurrentPin, setShowCurrentPin] = useState(false);
+      const [isProcessing, setIsProcessing] = useState(false);
 
       const handleAuth = async () => {
         if (!authName.trim() || !/^\d{4}$/.test(authPin)) {
@@ -237,7 +244,7 @@
               await _supabase.auth.signOut();
               throw new Error('ユーザーデータの作成に失敗しました。もう一度お試しください。');
             }
-            onAuthSuccess({ name: trimmedName, data: EMPTY_USER_DATA });
+            onAuthSuccess({ name: trimmedName, pin: authPin, data: EMPTY_USER_DATA });
             setShowAuthModal(false);
             alert('登録が完了し、ログインしました。');
           } else {
@@ -250,6 +257,7 @@
               .single();
             onAuthSuccess({
               name: trimmedName,
+              pin: authPin,
               data: {
                 matchHistory: dbData?.match_history || [],
                 playerDict: dbData?.player_dict || {}
@@ -269,6 +277,74 @@
         setShowAuthModal(false);
       };
 
+      const handleNameChange = async () => {
+        const trimmedName = newName.trim();
+        if (!trimmedName) {
+          alert('名前を入力してください。');
+          return;
+        }
+        if (trimmedName === loggedInUser) {
+          alert('現在の名前と同じです。');
+          return;
+        }
+        setIsProcessing(true);
+        try {
+          // 名前の重複チェック
+          const { data: isAvail } = await _supabase.rpc('check_email_available', { player_email: nameToEmail(trimmedName) });
+          if (!isAvail) {
+            throw new Error('この名前は既に登録されています。別の名前を選んでください。');
+          }
+          // auth ユーザーのメールと表示名を更新
+          const { error: updateError } = await _supabase.auth.updateUser({
+            email: nameToEmail(trimmedName),
+            data: { display_name: trimmedName }
+          });
+          if (updateError) throw new Error(updateError.message);
+          // 全ユーザーのデータ内の名前を更新
+          const { error: rpcError } = await _supabase.rpc('rename_player_in_all_histories', {
+            old_name: loggedInUser,
+            new_name: trimmedName
+          });
+          if (rpcError) throw new Error('データの更新に失敗しました。');
+          // 自分のデータを再取得
+          const { data: { session } } = await _supabase.auth.getSession();
+          const { data: dbData } = await _supabase
+            .from('user_data')
+            .select('match_history, player_dict')
+            .eq('id', session.user.id)
+            .single();
+          onNameChangeSuccess(trimmedName, {
+            matchHistory: dbData?.match_history || [],
+            playerDict: dbData?.player_dict || {}
+          });
+          setSettingsView('MAIN');
+          alert('名前を変更しました。');
+        } catch (error) {
+          alert(error.message);
+        } finally {
+          setIsProcessing(false);
+        }
+      };
+
+      const handlePinChange = async () => {
+        if (!/^\d{4}$/.test(newPin)) {
+          alert('4桁の数字を入力してください。');
+          return;
+        }
+        setIsProcessing(true);
+        try {
+          const { error } = await _supabase.auth.updateUser({ password: pinToPassword(newPin) });
+          if (error) throw new Error(error.message);
+          onPinChangeSuccess(newPin);
+          setSettingsView('MAIN');
+          alert('パスワードを変更しました。');
+        } catch (error) {
+          alert(error.message);
+        } finally {
+          setIsProcessing(false);
+        }
+      };
+
       const handleProtectedData = (callback) => {
         if (!loggedInUser) {
           alert('左上のメニューからログインしてください。');
@@ -285,6 +361,7 @@
             onClick={() => {
               setAuthName('');
               setAuthPin('');
+              setSettingsView('MAIN');
               setShowAuthModal(true);
             }}
             className="absolute top-6 left-6 p-2 text-white active:scale-95 z-10"
@@ -326,13 +403,90 @@
               <div className="bg-white text-gray-800 rounded-2xl w-full p-6 shadow-2xl relative">
                 
                 {loggedInUser ? (
-                  <div className="text-center">
-                    <h2 className="text-xl font-bold mb-4">アカウント設定</h2>
-                    <p className="mb-6">現在 <strong>{loggedInUser}</strong> でログインしています</p>
-                    <div className="flex justify-around">
-                      <button onClick={() => setShowAuthModal(false)} className="text-gray-500 font-medium px-4 py-2 border rounded">閉じる</button>
-                      <button onClick={handleLogout} className="text-pink-500 font-medium px-4 py-2 border border-pink-500 rounded">ログアウト</button>
-                    </div>
+                  <div>
+                    <h2 className="text-xl font-bold mb-4 text-center">アカウント設定</h2>
+
+                    {settingsView === 'MAIN' && (
+                      <div>
+                        <p className="text-center text-gray-500 mb-5 text-sm"><strong className="text-gray-800">{loggedInUser}</strong> でログイン中</p>
+                        <div className="space-y-2 mb-6">
+                          <button onClick={() => { setShowCurrentPin(false); setSettingsView('SHOW_PIN'); }} className="w-full text-left px-4 py-2 border border-gray-300 rounded text-gray-700 active:bg-gray-50">
+                            パスワードを確認
+                          </button>
+                          <button onClick={() => { setNewName(''); setSettingsView('NAME'); }} className="w-full text-left px-4 py-2 border border-gray-300 rounded text-gray-700 active:bg-gray-50">
+                            名前を変更
+                          </button>
+                          <button onClick={() => { setNewPin(''); setSettingsView('PIN'); }} className="w-full text-left px-4 py-2 border border-gray-300 rounded text-gray-700 active:bg-gray-50">
+                            パスワードを変更
+                          </button>
+                        </div>
+                        <div className="flex justify-around">
+                          <button onClick={() => setShowAuthModal(false)} className="text-gray-500 font-medium px-4 py-2 border rounded">閉じる</button>
+                          <button onClick={handleLogout} className="text-pink-500 font-medium px-4 py-2 border border-pink-500 rounded">ログアウト</button>
+                        </div>
+                      </div>
+                    )}
+
+                    {settingsView === 'SHOW_PIN' && (
+                      <div>
+                        <p className="text-center text-gray-500 text-sm mb-4">現在のパスワード（4桁）</p>
+                        {loggedInPin ? (
+                          <div className="flex items-center justify-center gap-3 mb-6">
+                            <span className="text-3xl font-bold tracking-widest text-gray-800">
+                              {showCurrentPin ? loggedInPin : '••••'}
+                            </span>
+                            <button onClick={() => setShowCurrentPin(!showCurrentPin)} className="text-blue-500 text-sm px-2 py-1 border border-blue-300 rounded">
+                              {showCurrentPin ? '隠す' : '表示'}
+                            </button>
+                          </div>
+                        ) : (
+                          <p className="text-center text-gray-400 text-sm mb-6">再ログインするとパスワードを確認できます</p>
+                        )}
+                        <div className="flex justify-center">
+                          <button onClick={() => { setSettingsView('MAIN'); setShowCurrentPin(false); }} className="text-gray-500 font-medium px-4 py-2 border rounded">戻る</button>
+                        </div>
+                      </div>
+                    )}
+
+                    {settingsView === 'NAME' && (
+                      <div>
+                        <p className="text-sm text-gray-500 mb-1 text-center">現在の名前: <strong>{loggedInUser}</strong></p>
+                        <p className="text-xs text-gray-400 mb-4 text-center">新しい名前（既存の名前は使用不可）</p>
+                        <input
+                          type="text"
+                          value={newName}
+                          onChange={(e) => setNewName(e.target.value)}
+                          className="w-full border border-gray-300 rounded px-3 py-2 outline-none focus:border-green-500 mb-4"
+                          placeholder="新しい名前を入力"
+                        />
+                        <div className="flex justify-around">
+                          <button onClick={() => setSettingsView('MAIN')} disabled={isProcessing} className="text-gray-500 font-medium px-4 py-2">キャンセル</button>
+                          <button onClick={handleNameChange} disabled={isProcessing} className={`text-green-600 font-medium px-4 py-2 border border-green-600 rounded ${isProcessing ? 'opacity-50' : ''}`}>
+                            {isProcessing ? '変更中...' : '変更する'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {settingsView === 'PIN' && (
+                      <div>
+                        <p className="text-sm text-gray-500 mb-4 text-center">新しいパスワード（4桁の数字）</p>
+                        <input
+                          type="password"
+                          maxLength="4"
+                          value={newPin}
+                          onChange={(e) => setNewPin(e.target.value.replace(/[^\d]/g, '').slice(0, 4))}
+                          className="w-full border border-gray-300 rounded px-3 py-2 outline-none focus:border-green-500 mb-4"
+                          placeholder="新しい4桁のパスワード"
+                        />
+                        <div className="flex justify-around">
+                          <button onClick={() => setSettingsView('MAIN')} disabled={isProcessing} className="text-gray-500 font-medium px-4 py-2">キャンセル</button>
+                          <button onClick={handlePinChange} disabled={isProcessing} className={`text-green-600 font-medium px-4 py-2 border border-green-600 rounded ${isProcessing ? 'opacity-50' : ''}`}>
+                            {isProcessing ? '変更中...' : '変更する'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div>
@@ -845,27 +999,29 @@
         name: initialP2?.name || 'プレイヤー2',
         sl: toSkill(initialP2?.sl, 4)
       };
-      const [p1, setP1] = useState(normalizedP1);
-      const [p2, setP2] = useState(normalizedP2);
+      const [p1, setP1] = useState({ ...normalizedP1, goal: SL_GOALS[normalizedP1.sl] });
+      const [p2, setP2] = useState({ ...normalizedP2, goal: SL_GOALS[normalizedP2.sl] });
       const safePlayerDict = playerDict || {};
       
       const [showDropdown1, setShowDropdown1] = useState(false);
       const [showDropdown2, setShowDropdown2] = useState(false);
 
       useEffect(() => {
-        setP1(normalizedP1);
+        setP1({ ...normalizedP1, goal: SL_GOALS[normalizedP1.sl] });
       }, [normalizedP1.name, normalizedP1.sl]);
 
       useEffect(() => {
-        setP2(normalizedP2);
+        setP2({ ...normalizedP2, goal: SL_GOALS[normalizedP2.sl] });
       }, [normalizedP2.name, normalizedP2.sl]);
 
       const handleSelectPlayer = (playerNum, name) => {
         if (playerNum === 1) {
-          setP1({ name, sl: safePlayerDict[name] || p1.sl });
+          const sl = toSkill(safePlayerDict[name], p1.sl);
+          setP1({ name, sl, goal: SL_GOALS[sl] });
           setShowDropdown1(false);
         } else {
-          setP2({ name, sl: safePlayerDict[name] || p2.sl });
+          const sl = toSkill(safePlayerDict[name], p2.sl);
+          setP2({ name, sl, goal: SL_GOALS[sl] });
           setShowDropdown2(false);
         }
       };
@@ -920,14 +1076,18 @@
 
             <div className="flex items-center mb-4">
               <label className="w-24 text-lg">Skill level:</label>
-              <input type="range" min="1" max="9" value={p1.sl} onChange={e => setP1({...p1, sl: parseInt(e.target.value)})} className="flex-1" />
+              <input type="range" min="1" max="9" value={p1.sl} onChange={e => { const sl = parseInt(e.target.value); setP1({...p1, sl, goal: SL_GOALS[sl]}); }} className="flex-1" />
               <span className="ml-4 w-6 h-6 rounded-full bg-green-600 flex items-center justify-center font-bold text-sm border border-white">{p1.sl}</span>
             </div>
             <div className="flex items-center">
               <label className="w-24 text-lg">Race to:</label>
-              <div className="flex-1 bg-[#1D5C45] border border-gray-500 rounded px-2 py-1 text-gray-200">
-                {SL_GOALS[p1.sl]}
-              </div>
+              <input
+                type="number"
+                min="1"
+                value={p1.goal}
+                onChange={e => { const val = Math.max(1, parseInt(e.target.value) || 1); setP1({...p1, goal: val}); }}
+                className="flex-1 bg-[#1D5C45] border border-gray-500 rounded px-2 py-1 text-gray-200 outline-none focus:border-green-400"
+              />
             </div>
           </div>
 
@@ -968,14 +1128,18 @@
 
             <div className="flex items-center mb-4">
               <label className="w-24 text-lg">Skill level:</label>
-              <input type="range" min="1" max="9" value={p2.sl} onChange={e => setP2({...p2, sl: parseInt(e.target.value)})} className="flex-1" />
+              <input type="range" min="1" max="9" value={p2.sl} onChange={e => { const sl = parseInt(e.target.value); setP2({...p2, sl, goal: SL_GOALS[sl]}); }} className="flex-1" />
               <span className="ml-4 w-6 h-6 rounded-full bg-pink-600 flex items-center justify-center font-bold text-sm border border-white">{p2.sl}</span>
             </div>
             <div className="flex items-center">
               <label className="w-24 text-lg">Race to:</label>
-              <div className="flex-1 bg-[#1D5C45] border border-gray-500 rounded px-2 py-1 text-gray-200">
-                {SL_GOALS[p2.sl]}
-              </div>
+              <input
+                type="number"
+                min="1"
+                value={p2.goal}
+                onChange={e => { const val = Math.max(1, parseInt(e.target.value) || 1); setP2({...p2, goal: val}); }}
+                className="flex-1 bg-[#1D5C45] border border-gray-500 rounded px-2 py-1 text-gray-200 outline-none focus:border-pink-400"
+              />
             </div>
           </div>
 
@@ -994,8 +1158,8 @@
     // ==========================================
     const MatchScreen = ({ p1Setup, p2Setup, onBack, onSaveMatch, initialMatchState, onMatchStateChange }) => {
       const getInitialState = () => ({
-        p1: { name: p1Setup.name, sl: p1Setup.sl, goal: SL_GOALS[p1Setup.sl], score: 0 },
-        p2: { name: p2Setup.name, sl: p2Setup.sl, goal: SL_GOALS[p2Setup.sl], score: 0 },
+        p1: { name: p1Setup.name, sl: p1Setup.sl, goal: p1Setup.goal !== undefined ? p1Setup.goal : SL_GOALS[p1Setup.sl], score: 0 },
+        p2: { name: p2Setup.name, sl: p2Setup.sl, goal: p2Setup.goal !== undefined ? p2Setup.goal : SL_GOALS[p2Setup.sl], score: 0 },
         activePlayer: null,
         rackWinner: null,
         isBreakSelection: true,
@@ -1355,23 +1519,27 @@
           </div>
 
           <div className="bg-[#0B3A2C] pt-4 pb-8 rounded-t-2xl shadow-[0_-4px_10px_rgba(0,0,0,0.3)] z-30">
-            <div className="flex flex-wrap justify-center gap-2 mb-6 px-4">
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => {
-                const isAvailable = tableBalls.includes(num);
-                return (
-                  <button
-                    key={num}
-                    onClick={() => handleBallTap(num)}
-                    disabled={!isAvailable || isNextRackPrompt || isBreakSelection || isGameOver}
-                    className={`w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold transition-all shadow-md
-                      ${isAvailable ? getBallColor(num) : 'bg-gray-800 opacity-20 shadow-none'}
-                      ${(isNextRackPrompt || isBreakSelection || isGameOver) ? 'cursor-not-allowed' : 'active:scale-95'}
-                    `}
-                  >
-                    {num}
-                  </button>
-                );
-              })}
+            <div className="flex flex-col items-center gap-2 mb-6 px-4">
+              {[[1,2,3,4],[5,6,7,8,9]].map((row, rowIdx) => (
+                <div key={rowIdx} className="flex gap-2">
+                  {row.map((num) => {
+                    const isAvailable = tableBalls.includes(num);
+                    return (
+                      <button
+                        key={num}
+                        onClick={() => handleBallTap(num)}
+                        disabled={!isAvailable || isNextRackPrompt || isBreakSelection || isGameOver}
+                        className={`w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold transition-all shadow-md
+                          ${isAvailable ? getBallColor(num) : 'bg-gray-800 opacity-20 shadow-none'}
+                          ${(isNextRackPrompt || isBreakSelection || isGameOver) ? 'cursor-not-allowed' : 'active:scale-95'}
+                        `}
+                      >
+                        {num}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
             </div>
             <div className="flex justify-around px-2 text-xs font-medium">
               <button onClick={handleDeadAction} disabled={!canDead} className={`flex flex-col items-center gap-1 transition-opacity ${canDead ? 'text-white opacity-100' : 'text-gray-500 opacity-50'}`}>
@@ -1415,6 +1583,7 @@
       const [p1Setup, setP1Setup] = useState(persisted.p1Setup || null);
       const [p2Setup, setP2Setup] = useState(persisted.p2Setup || null);
       const [loggedInUser, setLoggedInUser] = useState('');
+      const [loggedInPin, setLoggedInPin] = useState('');
       const [userData, setUserData] = useState(EMPTY_USER_DATA);
       const [isLoadingSession, setIsLoadingSession] = useState(true);
       const [matchMode, setMatchMode] = useState(persisted.matchMode || 'GUEST');
@@ -1423,6 +1592,7 @@
 
       const clearSession = () => {
         setLoggedInUser('');
+        setLoggedInPin('');
         setUserData(EMPTY_USER_DATA);
       };
 
@@ -1465,9 +1635,19 @@
         } catch (_error) {}
       }, [view, p1Setup, p2Setup, matchMode, registeredOpponent, matchSnapshot]);
 
-      const handleAuthSuccess = ({ name, data }) => {
+      const handleAuthSuccess = ({ name, pin, data }) => {
         setLoggedInUser(name || '');
+        setLoggedInPin(pin || '');
         setUserData(data || EMPTY_USER_DATA);
+      };
+
+      const handleNameChangeSuccess = (newName, newUserData) => {
+        setLoggedInUser(newName);
+        if (newUserData) setUserData(newUserData);
+      };
+
+      const handlePinChangeSuccess = (newPin) => {
+        setLoggedInPin(newPin);
       };
 
       const handleLogout = async () => {
@@ -1638,7 +1818,7 @@
 
       return (
         <>
-          {view === 'HOME' && <HomeScreen onNewMatch={handleOpenNewMatch} onViewMatchData={() => setView('HISTORY')} onViewPersonalData={() => setView('PERSONAL_DATA')} loggedInUser={loggedInUser} onAuthSuccess={handleAuthSuccess} onLogout={handleLogout} />}
+          {view === 'HOME' && <HomeScreen onNewMatch={handleOpenNewMatch} onViewMatchData={() => setView('HISTORY')} onViewPersonalData={() => setView('PERSONAL_DATA')} loggedInUser={loggedInUser} loggedInPin={loggedInPin} onAuthSuccess={handleAuthSuccess} onLogout={handleLogout} onNameChangeSuccess={handleNameChangeSuccess} onPinChangeSuccess={handlePinChangeSuccess} />}
           {view === 'MATCH_TYPE' && <MatchTypeScreen onBack={() => setView('HOME')} onGuest={handleSelectGuestMatch} onRegistered={handleSelectRegisteredMatch} />}
           {view === 'OPPONENT_AUTH' && <OpponentAuthScreen onBack={() => setView('MATCH_TYPE')} onSubmit={handleRegisteredOpponentSubmit} />}
           {view === 'SETUP' && <SetupScreen onStart={handleStartMatch} onBack={() => setView('HOME')} playerDict={userData.playerDict || {}} initialP1={{
