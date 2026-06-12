@@ -345,10 +345,11 @@
               .eq('id', data.user.id)
               .single();
             // 既存ユーザーの player_name が未設定の場合はここで設定する（遅延マイグレーション）
-            if (dbData && dbData.player_name === null) {
+            if (dbData && dbData.player_name == null) {
               const { data: nameAvail } = await _supabase.rpc('is_player_name_available', { p_name: trimmedName });
               if (nameAvail) {
-                await _supabase.from('user_data').update({ player_name: trimmedName }).eq('id', data.user.id);
+                const { error: migrateError } = await _supabase.from('user_data').update({ player_name: trimmedName }).eq('id', data.user.id);
+                if (migrateError) console.warn('player_name 遅延マイグレーション失敗:', migrateError);
               }
             }
             onAuthSuccess({
