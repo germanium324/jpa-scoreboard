@@ -367,7 +367,6 @@
         setIsProcessing(true);
         try {
           const activeSession = await ensureActiveSession();
-          const oldName = loggedInUser;
           // 名前の重複チェック
           const isAvail = await isNameAvailable(trimmedName);
           if (!isAvail) {
@@ -379,35 +378,48 @@
             data: { display_name: trimmedName }
           });
           if (updateError) throw new Error(updateError.message);
+          const oldName = loggedInUser;
           // 全ユーザーのデータ内の名前を更新
           const { error: rpcError } = await _supabase.rpc('rename_player_in_all_histories', {
             old_name: oldName,
             new_name: trimmedName
           });
+          if (rpcError) {
+            console.warn('rename_player_in_all_histories failed', rpcError);
+          }
           // 自分のデータを再取得
           const { data: dbData } = await _supabase
             .from('user_data')
             .select('match_history, player_dict')
             .eq('id', activeSession.user.id)
             .single();
-          const ownData = renameInUserData({
+          const ownDataFromDb = {
             matchHistory: dbData?.match_history || [],
             playerDict: dbData?.player_dict || {}
-          }, oldName, trimmedName);
+          };
+          let nextOwnData = ownDataFromDb;
+          let upsertFailed = false;
           if (rpcError) {
+            nextOwnData = renameInUserData(ownDataFromDb, oldName, trimmedName);
             const { error: upsertError } = await _supabase
               .from('user_data')
               .upsert({
                 id: activeSession.user.id,
-                match_history: ownData.matchHistory,
-                player_dict: ownData.playerDict,
+                match_history: nextOwnData.matchHistory,
+                player_dict: nextOwnData.playerDict,
                 updated_at: new Date().toISOString()
               });
-            if (upsertError) throw new Error('名前変更後のデータ更新に失敗しました。');
+            if (upsertError) {
+              console.warn('fallback user_data upsert failed', upsertError);
+              upsertFailed = true;
+              nextOwnData = ownDataFromDb;
+            }
           }
-          onNameChangeSuccess(trimmedName, ownData);
-          if (rpcError) {
-            alert('名前は変更しましたが、全体履歴の更新に失敗しました。supabase-setup.sql を再実行してください。');
+          onNameChangeSuccess(trimmedName, nextOwnData);
+          if (rpcError && upsertFailed) {
+            alert('名前は変更しましたが、履歴データの一部同期に失敗しました。履歴表示を確認し、必要なら再度名前変更を実行してください。');
+          } else if (rpcError) {
+            alert('名前は変更しましたが、他ユーザーの履歴には旧名が残る場合があります。必要なら再度名前変更を実行してください。');
           } else {
             alert('名前を変更しました。');
           }
