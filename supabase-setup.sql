@@ -50,7 +50,39 @@ $$;
 
 grant execute on function public.check_email_available(text) to authenticated;
 
--- 5. 全ユーザーのデータでプレイヤー名を一括変更する関数
+-- 5. 表示名ベースでプレイヤー名の一意性をチェックする関数
+create or replace function public.check_player_name_available(player_name text)
+returns boolean
+language sql
+security definer
+set search_path = auth, public
+as $$
+  select not exists (
+    select 1
+    from auth.users
+    where btrim(coalesce(raw_user_meta_data->>'display_name', '')) = btrim(player_name)
+  );
+$$;
+
+grant execute on function public.check_player_name_available(text) to authenticated;
+
+-- 6. 表示名から認証メールアドレスを解決する関数
+create or replace function public.resolve_player_auth_email(player_name text)
+returns text
+language sql
+security definer
+set search_path = auth, public
+as $$
+  select email
+  from auth.users
+  where btrim(coalesce(raw_user_meta_data->>'display_name', '')) = btrim(player_name)
+  order by created_at asc
+  limit 1;
+$$;
+
+grant execute on function public.resolve_player_auth_email(text) to authenticated;
+
+-- 7. 全ユーザーのデータでプレイヤー名を一括変更する関数
 create or replace function public.rename_player_in_all_histories(old_name text, new_name text)
 returns void
 language plpgsql

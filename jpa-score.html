@@ -74,14 +74,30 @@
     };
 
     const getNameEmailCandidates = (name) => {
-      const primaryEmail = nameToEmail(name);
-      const legacyEmail = legacyNameToEmail(name);
+      const trimmedName = name.trim();
+      const primaryEmail = nameToEmail(trimmedName);
+      const legacyEmail = legacyNameToEmail(trimmedName);
       return primaryEmail === legacyEmail ? [primaryEmail] : [primaryEmail, legacyEmail];
+    };
+
+    const resolveAuthEmailForName = async (name) => {
+      const trimmedName = name.trim();
+      if (!trimmedName) return null;
+      try {
+        const { data, error } = await _supabase.rpc('resolve_player_auth_email', { player_name: trimmedName });
+        if (error) return null;
+        return typeof data === 'string' && data ? data : null;
+      } catch (_error) {
+        return null;
+      }
     };
 
     const signInWithNameAndPin = async (client, name, pin) => {
       const password = pinToPassword(pin);
-      const candidates = getNameEmailCandidates(name);
+      const resolvedEmail = await resolveAuthEmailForName(name);
+      const candidates = resolvedEmail
+        ? [resolvedEmail, ...getNameEmailCandidates(name).filter((email) => email !== resolvedEmail)]
+        : getNameEmailCandidates(name);
       let lastError = null;
 
       for (const email of candidates) {
@@ -94,6 +110,16 @@
     };
 
     const isNameAvailable = async (name) => {
+      const trimmedName = name.trim();
+      if (!trimmedName) return false;
+      try {
+        const { data, error } = await _supabase.rpc('check_player_name_available', { player_name: trimmedName });
+        if (!error && typeof data === 'boolean') {
+          return data;
+        }
+      } catch (_error) {
+        // フォールバックで旧メール形式ベースの確認を行う
+      }
       const candidates = getNameEmailCandidates(name);
       for (const email of candidates) {
         const { data: isAvail } = await _supabase.rpc('check_email_available', { player_email: email });
@@ -291,8 +317,8 @@
 
         setIsSubmitting(true);
         try {
-          const email = nameToEmail(authName);
           const trimmedName = authName.trim();
+          const email = nameToEmail(trimmedName);
           const password = pinToPassword(authPin);
 
           if (authMode === 'REGISTER') {
@@ -372,9 +398,8 @@
           if (!isAvail) {
             throw new Error('この名前は既に登録されています。別の名前を選んでください。');
           }
-          // auth ユーザーのメールと表示名を更新
+          // auth ユーザーの表示名を更新（ログイン用メールは固定のまま扱う）
           const { error: updateError } = await _supabase.auth.updateUser({
-            email: nameToEmail(trimmedName),
             data: { display_name: trimmedName }
           });
           if (updateError) throw new Error(updateError.message);
