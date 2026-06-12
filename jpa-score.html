@@ -146,6 +146,28 @@
       return toSkill(dictSkill, fallback);
     };
 
+    const renameInUserData = (data, oldName, newName) => {
+      const safeData = data || EMPTY_USER_DATA;
+      const nextHistory = (Array.isArray(safeData.matchHistory) ? safeData.matchHistory : []).map((match) => {
+        if (!match || typeof match !== 'object') return match;
+        const nextMatch = { ...match };
+        if (nextMatch.p1?.name === oldName) {
+          nextMatch.p1 = { ...(nextMatch.p1 || {}), name: newName };
+        }
+        if (nextMatch.p2?.name === oldName) {
+          nextMatch.p2 = { ...(nextMatch.p2 || {}), name: newName };
+        }
+        return nextMatch;
+      });
+      const prevDict = safeData.playerDict && typeof safeData.playerDict === 'object' ? safeData.playerDict : {};
+      const nextDict = { ...prevDict };
+      if (Object.prototype.hasOwnProperty.call(nextDict, oldName)) {
+        nextDict[newName] = nextDict[oldName];
+        delete nextDict[oldName];
+      }
+      return { matchHistory: nextHistory, playerDict: nextDict };
+    };
+
     // --- 日時フォーマット関数 ---
     const formatTime = (ts) => {
       if (!ts) return '';
@@ -345,6 +367,7 @@
         setIsProcessing(true);
         try {
           const activeSession = await ensureActiveSession();
+          const oldName = loggedInUser;
           // 名前の重複チェック
           const isAvail = await isNameAvailable(trimmedName);
           if (!isAvail) {
@@ -358,22 +381,37 @@
           if (updateError) throw new Error(updateError.message);
           // 全ユーザーのデータ内の名前を更新
           const { error: rpcError } = await _supabase.rpc('rename_player_in_all_histories', {
-            old_name: loggedInUser,
+            old_name: oldName,
             new_name: trimmedName
           });
-          if (rpcError) throw new Error('データの更新に失敗しました。');
           // 自分のデータを再取得
           const { data: dbData } = await _supabase
             .from('user_data')
             .select('match_history, player_dict')
             .eq('id', activeSession.user.id)
             .single();
-          onNameChangeSuccess(trimmedName, {
+          const ownData = renameInUserData({
             matchHistory: dbData?.match_history || [],
             playerDict: dbData?.player_dict || {}
-          });
+          }, oldName, trimmedName);
+          if (rpcError) {
+            const { error: upsertError } = await _supabase
+              .from('user_data')
+              .upsert({
+                id: activeSession.user.id,
+                match_history: ownData.matchHistory,
+                player_dict: ownData.playerDict,
+                updated_at: new Date().toISOString()
+              });
+            if (upsertError) throw new Error('名前変更後のデータ更新に失敗しました。');
+          }
+          onNameChangeSuccess(trimmedName, ownData);
+          if (rpcError) {
+            alert('名前は変更しましたが、全体履歴の更新に失敗しました。supabase-setup.sql を再実行してください。');
+          } else {
+            alert('名前を変更しました。');
+          }
           setSettingsView('MAIN');
-          alert('名前を変更しました。');
         } catch (error) {
           alert(error.message);
         } finally {
