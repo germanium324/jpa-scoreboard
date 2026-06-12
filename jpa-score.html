@@ -81,6 +81,15 @@
 
     const signInWithNameAndPin = async (client, name, pin) => {
       const password = pinToPassword(pin);
+
+      // まず player_name による検索を試みる（名前変更済みユーザー対応）
+      const { data: emailByName } = await client.rpc('get_auth_email_by_name', { p_name: name });
+      if (emailByName) {
+        const { data, error } = await client.auth.signInWithPassword({ email: emailByName, password });
+        if (!error && data?.user) return { data, error: null };
+      }
+
+      // フォールバック: メールアドレス変換によるログイン（既存ユーザー互換）
       const candidates = getNameEmailCandidates(name);
       let lastError = null;
 
@@ -99,6 +108,9 @@
         const { data: isAvail } = await _supabase.rpc('check_email_available', { player_email: email });
         if (!isAvail) return false;
       }
+      // player_name による重複チェック（名前変更済みユーザーのために必要）
+      const { data: isPlayerNameAvail } = await _supabase.rpc('is_player_name_available', { p_name: name });
+      if (!isPlayerNameAvail) return false;
       return true;
     };
 
@@ -316,7 +328,7 @@
             }
             const { error: upsertError } = await _supabase
               .from('user_data')
-              .upsert({ id: data.user.id, match_history: [], player_dict: {} });
+              .upsert({ id: data.user.id, match_history: [], player_dict: {}, player_name: trimmedName });
             if (upsertError) {
               await _supabase.auth.signOut();
               throw new Error('ユーザーデータの作成に失敗しました。もう一度お試しください。');
@@ -329,9 +341,16 @@
             if (error) throw new Error('プレイヤー名またはパスワードが間違っています。');
             const { data: dbData } = await _supabase
               .from('user_data')
-              .select('match_history, player_dict')
+              .select('match_history, player_dict, player_name')
               .eq('id', data.user.id)
               .single();
+            // 既存ユーザーの player_name が未設定の場合はここで設定する（遅延マイグレーション）
+            if (dbData && dbData.player_name === null) {
+              const { data: nameAvail } = await _supabase.rpc('is_player_name_available', { p_name: trimmedName });
+              if (nameAvail) {
+                await _supabase.from('user_data').update({ player_name: trimmedName }).eq('id', data.user.id);
+              }
+            }
             onAuthSuccess({
               name: trimmedName,
               pin: authPin,
@@ -372,12 +391,14 @@
           if (!isAvail) {
             throw new Error('この名前は既に登録されています。別の名前を選んでください。');
           }
-          // auth ユーザーのメールと表示名を更新
-          const { error: updateError } = await _supabase.auth.updateUser({
-            email: nameToEmail(trimmedName),
-            data: { display_name: trimmedName }
-          });
-          if (updateError) throw new Error(updateError.message);
+          // player_name を user_data に更新（auth メールは変更しない）
+          const { error: playerNameError } = await _supabase
+            .from('user_data')
+            .update({ player_name: trimmedName })
+            .eq('id', activeSession.user.id);
+          if (playerNameError) throw new Error(playerNameError.message);
+          // auth ユーザーの表示名のみ更新（メールは変更しない）
+          await _supabase.auth.updateUser({ data: { display_name: trimmedName } });
           const oldName = loggedInUser;
           // 全ユーザーのデータ内の名前を更新
           const { error: rpcError } = await _supabase.rpc('rename_player_in_all_histories', {

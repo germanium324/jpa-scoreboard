@@ -50,7 +50,41 @@ $$;
 
 grant execute on function public.check_email_available(text) to authenticated;
 
--- 5. 全ユーザーのデータでプレイヤー名を一括変更する関数
+-- 5. player_name カラムの追加（現在の表示名を追跡する。名前変更時に更新される）
+alter table public.user_data add column if not exists player_name text;
+create unique index if not exists user_data_player_name_idx on public.user_data(player_name) where player_name is not null;
+
+-- 6. 表示名からログイン用 auth メールを取得する関数（ログイン時に使用）
+create or replace function public.get_auth_email_by_name(p_name text)
+returns text
+language sql
+security definer
+set search_path = auth, public
+as $$
+  select u.email
+  from auth.users u
+  join public.user_data ud on ud.id = u.id
+  where ud.player_name = p_name
+  limit 1;
+$$;
+
+grant execute on function public.get_auth_email_by_name(text) to anon, authenticated;
+
+-- 7. player_name の空き確認関数（名前変更・登録時に使用）
+create or replace function public.is_player_name_available(p_name text)
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select not exists (
+    select 1 from public.user_data where player_name = p_name
+  );
+$$;
+
+grant execute on function public.is_player_name_available(text) to anon, authenticated;
+
+-- 8. 全ユーザーのデータでプレイヤー名を一括変更する関数
 create or replace function public.rename_player_in_all_histories(old_name text, new_name text)
 returns void
 language plpgsql
@@ -112,4 +146,24 @@ grant execute on function public.rename_player_in_all_histories(text, text) to a
 --    これらの値は Supabase プロジェクト > Settings > API で確認できます。
 --    anon (public) key はフロントエンドに公開して問題ありません。
 --    RLS ポリシーにより、各ユーザーは自分のデータにのみアクセスできます。
+--
+-- ■ 既存 Supabase プロジェクトへの追加マイグレーション（アップデート時のみ）
+--    既にセットアップ済みのプロジェクトに名前変更修正を適用する場合は、
+--    以下の SQL のみを SQL Editor で実行してください:
+--
+--    alter table public.user_data add column if not exists player_name text;
+--    create unique index if not exists user_data_player_name_idx on public.user_data(player_name) where player_name is not null;
+--
+--    create or replace function public.get_auth_email_by_name(p_name text)
+--    returns text language sql security definer set search_path = auth, public as $$
+--      select u.email from auth.users u join public.user_data ud on ud.id = u.id
+--      where ud.player_name = p_name limit 1;
+--    $$;
+--    grant execute on function public.get_auth_email_by_name(text) to anon, authenticated;
+--
+--    create or replace function public.is_player_name_available(p_name text)
+--    returns boolean language sql security definer set search_path = public as $$
+--      select not exists (select 1 from public.user_data where player_name = p_name);
+--    $$;
+--    grant execute on function public.is_player_name_available(text) to anon, authenticated;
 -- ============================================================
