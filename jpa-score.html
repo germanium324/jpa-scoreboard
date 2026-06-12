@@ -69,6 +69,7 @@
 
     const createTransientClient = () => window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: {
+        storageKey: 'jpa-scoreboard-transient-auth',
         persistSession: false,
         autoRefreshToken: false,
         detectSessionInUrl: false
@@ -210,6 +211,21 @@
       const [showCurrentPin, setShowCurrentPin] = useState(false);
       const [isProcessing, setIsProcessing] = useState(false);
 
+      const ensureActiveSession = async () => {
+        const { data: { session } } = await _supabase.auth.getSession();
+        if (session) return session;
+
+        if (loggedInUser && /^\d{4}$/.test(loggedInPin || '')) {
+          const { data, error } = await _supabase.auth.signInWithPassword({
+            email: nameToEmail(loggedInUser),
+            password: pinToPassword(loggedInPin)
+          });
+          if (!error && data?.session) return data.session;
+        }
+
+        throw new Error('認証セッションが切れました。いったんログアウトして再ログインしてください。');
+      };
+
       const handleAuth = async () => {
         if (!authName.trim() || !/^\d{4}$/.test(authPin)) {
           alert('名前と4桁の数字パスワードを入力してください。');
@@ -289,6 +305,7 @@
         }
         setIsProcessing(true);
         try {
+          const activeSession = await ensureActiveSession();
           // 名前の重複チェック
           const { data: isAvail } = await _supabase.rpc('check_email_available', { player_email: nameToEmail(trimmedName) });
           if (!isAvail) {
@@ -307,11 +324,10 @@
           });
           if (rpcError) throw new Error('データの更新に失敗しました。');
           // 自分のデータを再取得
-          const { data: { session } } = await _supabase.auth.getSession();
           const { data: dbData } = await _supabase
             .from('user_data')
             .select('match_history, player_dict')
-            .eq('id', session.user.id)
+            .eq('id', activeSession.user.id)
             .single();
           onNameChangeSuccess(trimmedName, {
             matchHistory: dbData?.match_history || [],
@@ -333,6 +349,7 @@
         }
         setIsProcessing(true);
         try {
+          await ensureActiveSession();
           const { error } = await _supabase.auth.updateUser({ password: pinToPassword(newPin) });
           if (error) throw new Error(error.message);
           onPinChangeSuccess(newPin);
