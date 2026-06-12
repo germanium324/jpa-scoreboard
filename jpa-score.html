@@ -215,7 +215,8 @@
         const { data: { session } } = await _supabase.auth.getSession();
         if (session) return session;
 
-        if (loggedInUser && /^\d{4}$/.test(loggedInPin || '')) {
+        const hasStoredPin = typeof loggedInPin === 'string' && /^\d{4}$/.test(loggedInPin);
+        if (loggedInUser && hasStoredPin) {
           const { data, error } = await _supabase.auth.signInWithPassword({
             email: nameToEmail(loggedInUser),
             password: pinToPassword(loggedInPin)
