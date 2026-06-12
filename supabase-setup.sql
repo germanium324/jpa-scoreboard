@@ -17,16 +17,19 @@ create table if not exists public.user_data (
 alter table public.user_data enable row level security;
 
 -- 3. RLS ポリシー: 自分のデータのみ参照・作成・更新可能
+drop policy if exists "ユーザーは自分のデータのみ参照できる" on public.user_data;
 create policy "ユーザーは自分のデータのみ参照できる"
   on public.user_data
   for select
   using (auth.uid() = id);
 
+drop policy if exists "ユーザーは自分のデータのみ作成できる" on public.user_data;
 create policy "ユーザーは自分のデータのみ作成できる"
   on public.user_data
   for insert
   with check (auth.uid() = id);
 
+drop policy if exists "ユーザーは自分のデータのみ更新できる" on public.user_data;
 create policy "ユーザーは自分のデータのみ更新できる"
   on public.user_data
   for update
