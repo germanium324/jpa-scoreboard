@@ -15,8 +15,7 @@
     input[type=range] { -webkit-appearance: none; background: transparent; }
     input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 20px; width: 20px; border-radius: 50%; background: #10B981; cursor: pointer; margin-top: -8px; box-shadow: 0 0 5px rgba(0,0,0,0.5); border: 2px solid white; }
     input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 4px; cursor: pointer; background: #2A6552; border-radius: 2px; }
-    .graph-line { stroke: #F472B6; stroke-width: 2; fill: none; stroke-linejoin: round; }
-    .graph-point { fill: #F472B6; stroke: #0F4C3A; stroke-width: 1.5; }
+    .graph-line { stroke: white; stroke-width: 1; fill: none; stroke-linejoin: round; }
   </style>
 </head>
 <body>
@@ -26,22 +25,35 @@
     const { useState, useEffect, useRef } = React;
 
     // =====================================================
-    // Supabase 設定 - あなたのプロジェクトの値に置き換えてください
-    // Supabase プロジェクト URL と anon key は
-    // https://app.supabase.com のプロジェクト設定 > API で確認できます
+    // Supabase 設定
+    // GitHub Actions がビルド時に自動的にここを書き換えます
     // =====================================================
-    const SUPABASE_URL = 'https://zrplcxyedwfnqgciwttz.supabase.co';
-    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpycGxjeHllZHdmbnFnY2l3dHR6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5Nzk3ODYsImV4cCI6MjA5NjU1NTc4Nn0.wafBOBExTXP_NVs4YDZiAN2lqqeo4SBOYIn6jknsngA';
+    const SUPABASE_URL = 'YOUR_SUPABASE_PROJECT_URL';
+    const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
     const isSupabaseConfigured =
       SUPABASE_URL !== 'YOUR_SUPABASE_PROJECT_URL' &&
       SUPABASE_ANON_KEY !== 'YOUR_SUPABASE_ANON_KEY';
     // =====================================================
 
-    const _supabase = isSupabaseConfigured
-      ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-      : null;
+    // 通信ブロック対策: window.supabase が読み込めているか安全に確認
+    let _supabase = null;
+    if (isSupabaseConfigured && window.supabase) {
+      _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    }
+
     const EMPTY_USER_DATA = { matchHistory: [], playerDict: {} };
     const APP_STATE_KEY = 'jpa-scoreboard-app-state-v1';
+
+    // ローカルストレージ安全読み込み（JSONパースエラーによるクラッシュ防止）
+    const safeJsonParse = (key, fallback) => {
+      try {
+        const val = localStorage.getItem(key);
+        return val ? JSON.parse(val) : fallback;
+      } catch (e) {
+        console.warn(`Failed to parse ${key}`, e);
+        return fallback;
+      }
+    };
 
     const loadPersistedAppState = () => {
       try {
@@ -55,7 +67,7 @@
       }
     };
 
-    // 旧来のメール変換（既存ユーザー互換のため維持）
+    // プレイヤー名を Supabase auth 用の合成メールアドレスに変換する
     const legacyNameToEmail = (name) => {
       const bytes = new TextEncoder().encode(name.trim());
       let binary = '';
@@ -65,7 +77,6 @@
       return `u_${encoded}@jpa-scoreboard.app`;
     };
 
-    // プレイヤー名を Supabase auth 用の合成メールアドレスに変換する（英小文字と数字のみ）
     const nameToEmail = (name) => {
       const bytes = new TextEncoder().encode(name.trim());
       let encoded = '';
@@ -80,6 +91,7 @@
     };
 
     const signInWithNameAndPin = async (client, name, pin) => {
+      if (!client) throw new Error("Supabase is not loaded");
       const password = pinToPassword(pin);
       const candidates = getNameEmailCandidates(name);
       let lastError = null;
@@ -94,6 +106,7 @@
     };
 
     const isNameAvailable = async (name) => {
+      if (!_supabase) return false;
       const candidates = getNameEmailCandidates(name);
       for (const email of candidates) {
         const { data: isAvail } = await _supabase.rpc('check_email_available', { player_email: email });
@@ -104,14 +117,17 @@
 
     const pinToPassword = (pin) => `jpa-pin-${pin}`;
 
-    const createTransientClient = () => window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: {
-        storageKey: 'jpa-scoreboard-transient-auth',
-        persistSession: false,
-        autoRefreshToken: false,
-        detectSessionInUrl: false
-      }
-    });
+    const createTransientClient = () => {
+      if (!window.supabase) throw new Error("Supabase script is blocked.");
+      return window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: {
+          storageKey: 'jpa-scoreboard-transient-auth',
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false
+        }
+      });
+    };
 
     const toSkill = (value, fallback) => {
       const num = Number(value);
@@ -168,7 +184,6 @@
       return { matchHistory: nextHistory, playerDict: nextDict };
     };
 
-    // --- 日時フォーマット関数 ---
     const formatTime = (ts) => {
       if (!ts) return '';
       const d = new Date(ts);
@@ -181,13 +196,11 @@
       return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
     };
 
-    // --- JPA SL to Goal Mapping ---
     const SL_GOALS = {
       1: 14, 2: 19, 3: 25, 4: 31, 5: 38,
       6: 46, 7: 55, 8: 65, 9: 75
     };
 
-    // --- JPA チーム得点換算表ロジック ---
     const getTeamPoints = (loserSL, loserScore) => {
       const thresholds = {
         1: [2, 3, 4, 6, 7, 8, 10, 11, 13],
@@ -211,13 +224,12 @@
       return { winner: 20 - loserPts, loser: loserPts };
     };
 
-    // --- スタッツ計算ロジック ---
     const computeStats = (timeline, pKey) => {
       let pots = 0, misses = 0, safeties = 0, breaks = 0, nineBalls = 0, deads = 0;
       let maxRun = 0, currentRun = 0;
 
-      timeline.forEach(inn => {
-        inn[pKey].forEach(action => {
+      (timeline || []).forEach(inn => {
+        (inn[pKey] || []).forEach(action => {
           if (action.type === 'break') breaks++;
           if (action.type === 'safety') { safeties++; currentRun = 0; }
           if (action.type === 'switch') { misses++; currentRun = 0; }
@@ -236,7 +248,6 @@
       return { pots, misses, safeties, breaks, nineBalls, maxRun, accuracy, deads };
     };
 
-    // --- 球のデザイン定義 ---
     const getBallColor = (num) => {
       const colors = {
         1: 'bg-yellow-400 text-white', 2: 'bg-blue-600 text-white', 3: 'bg-red-600 text-white',
@@ -258,19 +269,19 @@
     // ==========================================
     const HomeScreen = ({ onNewMatch, onViewMatchData, onViewPersonalData, loggedInUser, loggedInPin, onAuthSuccess, onLogout, onNameChangeSuccess, onPinChangeSuccess }) => {
       const [showAuthModal, setShowAuthModal] = useState(false);
-      const [authMode, setAuthMode] = useState('LOGIN'); // 'LOGIN' or 'REGISTER'
+      const [authMode, setAuthMode] = useState('LOGIN');
       const [authName, setAuthName] = useState('');
       const [authPin, setAuthPin] = useState('');
       const [isSubmitting, setIsSubmitting] = useState(false);
 
-      // アカウント設定用の状態
-      const [settingsView, setSettingsView] = useState('MAIN'); // 'MAIN'|'SHOW_PIN'|'NAME'|'PIN'
+      const [settingsView, setSettingsView] = useState('MAIN');
       const [newName, setNewName] = useState('');
       const [newPin, setNewPin] = useState('');
       const [showCurrentPin, setShowCurrentPin] = useState(false);
       const [isProcessing, setIsProcessing] = useState(false);
 
       const ensureActiveSession = async () => {
+        if (!_supabase) throw new Error("Supabase is offline");
         const { data: { session } } = await _supabase.auth.getSession();
         if (session) return session;
 
@@ -286,6 +297,10 @@
       const handleAuth = async () => {
         if (!authName.trim() || !/^\d{4}$/.test(authPin)) {
           alert('名前と4桁の数字パスワードを入力してください。');
+          return;
+        }
+        if (!_supabase) {
+          alert('データベース通信がブロックされているためログインできません。');
           return;
         }
 
@@ -367,27 +382,22 @@
         setIsProcessing(true);
         try {
           const activeSession = await ensureActiveSession();
-          // 名前の重複チェック
           const isAvail = await isNameAvailable(trimmedName);
           if (!isAvail) {
             throw new Error('この名前は既に登録されています。別の名前を選んでください。');
           }
-          // auth ユーザーのメールと表示名を更新
           const { error: updateError } = await _supabase.auth.updateUser({
             email: nameToEmail(trimmedName),
             data: { display_name: trimmedName }
           });
           if (updateError) throw new Error(updateError.message);
           const oldName = loggedInUser;
-          // 全ユーザーのデータ内の名前を更新
+          
           const { error: rpcError } = await _supabase.rpc('rename_player_in_all_histories', {
             old_name: oldName,
             new_name: trimmedName
           });
-          if (rpcError) {
-            console.warn('rename_player_in_all_histories failed', rpcError);
-          }
-          // 自分のデータを再取得
+          
           const { data: dbData } = await _supabase
             .from('user_data')
             .select('match_history, player_dict')
@@ -410,16 +420,13 @@
                 updated_at: new Date().toISOString()
               });
             if (upsertError) {
-              console.warn('fallback user_data upsert failed', upsertError);
               upsertFailed = true;
               nextOwnData = ownDataFromDb;
             }
           }
           onNameChangeSuccess(trimmedName, nextOwnData);
           if (rpcError && upsertFailed) {
-            alert('名前は変更しましたが、履歴データの一部同期に失敗しました。履歴表示を確認し、必要なら再度名前変更を実行してください。');
-          } else if (rpcError) {
-            alert('名前は変更しましたが、他ユーザーの履歴には旧名が残る場合があります。必要なら再度名前変更を実行してください。');
+            alert('名前は変更しましたが、履歴データの一部同期に失敗しました。');
           } else {
             alert('名前を変更しました。');
           }
@@ -461,8 +468,6 @@
 
       return (
         <div className="flex flex-col h-[100dvh] max-w-md mx-auto bg-[#0F4C3A] relative items-center justify-center p-6">
-          
-          {/* 左上のハンバーガーメニュー */}
           <button 
             onClick={() => {
               setAuthName('');
@@ -503,7 +508,6 @@
             </button>
           </div>
 
-          {/* 認証・登録モーダル */}
           {showAuthModal && (
             <div className="absolute inset-0 z-50 bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
               <div className="bg-white text-gray-800 rounded-2xl w-full p-6 shadow-2xl relative">
@@ -661,7 +665,8 @@
       const [isDeleting, setIsDeleting] = useState(false);
 
       useEffect(() => {
-        const filteredData = (matchHistory || []).filter(m => m.p1.name === loggedInUser || m.p2.name === loggedInUser);
+        const safeData = Array.isArray(matchHistory) ? matchHistory : [];
+        const filteredData = safeData.filter(m => m && m.p1 && m.p2 && (m.p1.name === loggedInUser || m.p2.name === loggedInUser));
         filteredData.sort((a, b) => b.startTime - a.startTime);
         setHistoryData(filteredData);
       }, [loggedInUser, matchHistory]);
@@ -746,10 +751,10 @@
                 <p className="text-center text-sm font-medium text-gray-500 mb-4">イニング : {selectedMatch.inning}</p>
                 
                 <div className="border-t border-gray-200 py-3 space-y-1">
-                  <StatRow label="セーフティー" v1={selectedMatch.p1Stats.safeties} v2={selectedMatch.p2Stats.safeties} />
-                  <StatRow label="シュート精度" v1={`${selectedMatch.p1Stats.accuracy}%`} v2={`${selectedMatch.p2Stats.accuracy}%`} />
-                  <StatRow label="ブレイク回数" v1={selectedMatch.p1Stats.breaks} v2={selectedMatch.p2Stats.breaks} />
-                  <StatRow label="最大連続得点" v1={selectedMatch.p1Stats.maxRun} v2={selectedMatch.p2Stats.maxRun} />
+                  <StatRow label="セーフティー" v1={selectedMatch.p1Stats?.safeties || 0} v2={selectedMatch.p2Stats?.safeties || 0} />
+                  <StatRow label="シュート精度" v1={`${selectedMatch.p1Stats?.accuracy || 0}%`} v2={`${selectedMatch.p2Stats?.accuracy || 0}%`} />
+                  <StatRow label="ブレイク回数" v1={selectedMatch.p1Stats?.breaks || 0} v2={selectedMatch.p2Stats?.breaks || 0} />
+                  <StatRow label="最大連続得点" v1={selectedMatch.p1Stats?.maxRun || 0} v2={selectedMatch.p2Stats?.maxRun || 0} />
                 </div>
                 
                 <div className="flex justify-around mt-4 pt-2">
@@ -792,18 +797,18 @@
                   
                   <div className="flex justify-between items-center mb-2 pointer-events-none">
                     <div className={`text-center flex-1 ${match.winner === 1 ? 'text-pink-400 font-bold' : ''}`}>
-                      <p className="text-xs truncate">{match.p1.name} (SL:{match.p1.sl})</p>
-                      <p className="text-3xl mt-1">{match.p1.score}<span className="text-sm text-gray-400 font-normal">/{match.p1.goal}</span></p>
+                      <p className="text-xs truncate">{match.p1?.name} (SL:{match.p1?.sl})</p>
+                      <p className="text-3xl mt-1">{match.p1?.score}<span className="text-sm text-gray-400 font-normal">/{match.p1?.goal}</span></p>
                     </div>
                     <div className="text-center px-2 text-sm text-gray-400">vs</div>
                     <div className={`text-center flex-1 ${match.winner === 2 ? 'text-pink-400 font-bold' : ''}`}>
-                      <p className="text-xs truncate">{match.p2.name} (SL:{match.p2.sl})</p>
-                      <p className="text-3xl mt-1">{match.p2.score}<span className="text-sm text-gray-400 font-normal">/{match.p2.goal}</span></p>
+                      <p className="text-xs truncate">{match.p2?.name} (SL:{match.p2?.sl})</p>
+                      <p className="text-3xl mt-1">{match.p2?.score}<span className="text-sm text-gray-400 font-normal">/{match.p2?.goal}</span></p>
                     </div>
                   </div>
                   
                   <div className="text-center mt-3 pt-2 border-t border-[#2A6552] text-sm font-medium pointer-events-none">
-                    チーム得点: {match.p1TeamPts} - {match.p2TeamPts}
+                    チーム得点: {match.p1TeamPts || 0} - {match.p2TeamPts || 0}
                   </div>
                 </div>
               ))
@@ -831,32 +836,21 @@
     // ==========================================
     const PersonalDataScreen = ({ onBack, loggedInUser, matchHistory }) => {
       const [stats, setStats] = useState({
-        matches: 0,
-        winRate: 0,
-        accuracy: 0,
-        maxRun: 0,
-        masuwari: 0,
-        graphData: []
+        matches: 0, winRate: 0, accuracy: 0, maxRun: 0, masuwari: 0, graphData: []
       });
 
       useEffect(() => {
-        const userMatches = (matchHistory || []).filter(m => m.p1.name === loggedInUser || m.p2.name === loggedInUser);
+        const safeData = Array.isArray(matchHistory) ? matchHistory : [];
+        const userMatches = safeData.filter(m => m && m.p1 && m.p2 && (m.p1.name === loggedInUser || m.p2.name === loggedInUser));
         
         if (userMatches.length === 0) {
-          setStats({
-            matches: 0,
-            winRate: 0,
-            accuracy: 0,
-            maxRun: 0,
-            masuwari: 0,
-            graphData: []
-          });
+          setStats({ matches: 0, winRate: 0, accuracy: 0, maxRun: 0, masuwari: 0, graphData: [] });
           return;
         }
 
         let totalWins = 0;
         let totalPots = 0;
-        let totalShots = 0; // pots + misses + deads
+        let totalShots = 0;
         let overallMaxRun = 0;
         let masuwariCount = 0;
         
@@ -865,18 +859,17 @@
         userMatches.forEach(m => {
           const isP1 = m.p1.name === loggedInUser;
           const pKey = isP1 ? 'p1' : 'p2';
-          const pStats = isP1 ? m.p1Stats : m.p2Stats;
+          const pStats = (isP1 ? m.p1Stats : m.p2Stats) || { pots: 0, misses: 0, maxRun: 0 };
 
           if ((isP1 && m.winner === 1) || (!isP1 && m.winner === 2)) totalWins++;
           
-          totalPots += pStats.pots;
-          totalShots += (pStats.pots + pStats.misses); // computeStats includes deads in misses
+          totalPots += (pStats.pots || 0);
+          totalShots += ((pStats.pots || 0) + (pStats.misses || 0));
           
-          if (pStats.maxRun > overallMaxRun) overallMaxRun = pStats.maxRun;
+          if ((pStats.maxRun || 0) > overallMaxRun) overallMaxRun = pStats.maxRun;
 
-          // マスワリ判定
-          m.timeline.forEach(inn => {
-            const actions = inn[pKey];
+          (m.timeline || []).forEach(inn => {
+            const actions = inn[pKey] || [];
             const hasBreak = actions.some(a => a.type === 'break');
             const pots = actions.filter(a => a.type === 'pot').length;
             const hasSwitch = actions.some(a => a.type === 'switch');
@@ -888,17 +881,15 @@
             }
           });
 
-          // グラフ用データ（得点 / イニング）
-          const score = isP1 ? m.p1.score : m.p2.score;
-          const innCount = Math.max(m.inning, 1);
+          const score = isP1 ? (m.p1?.score || 0) : (m.p2?.score || 0);
+          const innCount = Math.max(m.inning || 1, 1);
           gData.push({
             date: m.startTime,
-            dateLabel: formatDate(m.startTime).slice(5), // MM/DD
+            dateLabel: formatDate(m.startTime).slice(5),
             ppi: score / innCount
           });
         });
 
-        // グラフ用に時系列順に並び替え
         gData.sort((a, b) => a.date - b.date);
 
         setStats({
@@ -912,34 +903,44 @@
 
       }, [loggedInUser, matchHistory]);
 
-      const drawGraph = () => {
+      const maxY = stats.graphData.length > 0 ? Math.ceil(Math.max(...stats.graphData.map(d => d.ppi), 2) * 2) / 2 : 2;
+      const yTicks = [];
+      for (let i = maxY; i >= 0; i -= 0.5) {
+        yTicks.push(i);
+      }
+
+      const drawGraph = (maxYLimit) => {
         if (stats.graphData.length === 0) return null;
         
         const gData = stats.graphData;
-        const maxPPI = Math.max(...gData.map(d => d.ppi), 2); // 最小でも2を天井に
-        const w = 100; // viewBox width 100%
-        const h = 100; // viewBox height 100%
-        
         let points = '';
-        const xStep = gData.length > 1 ? w / (gData.length - 1) : w / 2;
+        const xStep = gData.length > 1 ? 100 / (gData.length - 1) : 50;
         
         gData.forEach((d, i) => {
-          const x = gData.length > 1 ? i * xStep : xStep;
-          const y = h - (d.ppi / maxPPI) * h;
+          const x = gData.length > 1 ? i * xStep : 50;
+          const y = 100 - (d.ppi / maxYLimit) * 100;
           points += `${x},${y} `;
         });
 
         return (
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full overflow-visible py-2">
-            <polyline points={points.trim()} className="graph-line" />
-            {gData.map((d, i) => {
-              const x = gData.length > 1 ? i * xStep : xStep;
-              const y = h - (d.ppi / maxPPI) * h;
-              return (
-                <circle key={i} cx={x} cy={y} r="2" className="graph-point" />
-              );
-            })}
-          </svg>
+          <React.Fragment>
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute top-0 left-0 w-full h-full overflow-visible">
+              <polyline points={points.trim()} stroke="white" strokeWidth="1" fill="none" strokeLinejoin="round" />
+            </svg>
+            <div className="absolute top-0 left-0 w-full h-full pointer-events-none">
+              {gData.map((d, i) => {
+                const x = gData.length > 1 ? i * xStep : 50;
+                const y = 100 - (d.ppi / maxYLimit) * 100;
+                return (
+                  <div 
+                    key={i} 
+                    className="absolute bg-white rounded-full" 
+                    style={{ left: `${x}%`, top: `${y}%`, width: '6px', height: '6px', transform: 'translate(-50%, -50%)', border: '1.5px solid #0F4C3A' }} 
+                  />
+                );
+              })}
+            </div>
+          </React.Fragment>
         );
       };
 
@@ -983,20 +984,34 @@
               </div>
             </div>
 
-            <div className="bg-[#1D5C45] rounded-xl border border-[#2A6552] p-4">
-              <p className="text-sm text-gray-300 mb-2 font-medium">得点/イニング推移</p>
-              <div className="w-full h-[25vh] relative pl-1 pr-1">
-                {stats.graphData.length > 0 ? drawGraph() : (
-                  <div className="flex items-center justify-center w-full h-full text-gray-500 text-sm">データがありません</div>
+            <div className="bg-[#1D5C45] rounded-xl border border-[#2A6552] p-4 mb-8">
+              <p className="text-sm text-gray-300 mb-4 font-medium">得点/イニング推移</p>
+              
+              <div className="w-full h-[25vh] relative pl-8 pb-6 pr-2">
+                <div className="absolute top-4 bottom-6 left-8 right-2 border-l border-b border-[#2A6552]">
+                  {yTicks.map(tick => {
+                    const y = 100 - (tick / maxY) * 100;
+                    return (
+                      <span key={tick} className="absolute -left-2 text-[10px] text-gray-400 leading-none text-right w-6" style={{ top: `${y}%`, transform: 'translate(-100%, -50%)' }}>
+                        {tick.toFixed(1)}
+                      </span>
+                    );
+                  })}
+                  
+                  <div className="absolute inset-0">
+                    {stats.graphData.length > 0 ? drawGraph(maxY) : (
+                      <div className="flex items-center justify-center w-full h-full text-gray-500 text-sm">データがありません</div>
+                    )}
+                  </div>
+                </div>
+
+                {stats.graphData.length > 0 && (
+                  <div className="absolute bottom-0 left-8 right-2 flex justify-between text-[10px] text-gray-400">
+                    <span style={{ transform: 'translateX(-50%)' }}>{stats.graphData[0].dateLabel}</span>
+                    {stats.graphData.length > 1 && <span style={{ transform: 'translateX(50%)' }}>{stats.graphData[stats.graphData.length - 1].dateLabel}</span>}
+                  </div>
                 )}
               </div>
-              {/* X軸のラベル */}
-              {stats.graphData.length > 0 && (
-                <div className="flex justify-between mt-2 text-[10px] text-gray-400">
-                  <span>{stats.graphData[0].dateLabel}</span>
-                  {stats.graphData.length > 1 && <span>{stats.graphData[stats.graphData.length - 1].dateLabel}</span>}
-                </div>
-              )}
             </div>
 
           </div>
@@ -1484,7 +1499,7 @@
         </div>
       );
 
-      const renderTimelineActions = (actions) => actions.map((action, idx) => (
+      const renderTimelineActions = (actions) => (actions || []).map((action, idx) => (
         <React.Fragment key={idx}>
           {action.type === 'break' && <span className="text-white text-xs font-bold mx-1">B</span>}
           {action.type === 'pot' && <MiniBall num={action.ball} />}
@@ -1561,8 +1576,8 @@
                 </div>
                 
                 <div className="flex justify-around mt-4 pt-2">
-                  <button onClick={handleSave} disabled={isSaving} aria-disabled={isSaving} className={`text-blue-500 font-medium text-lg px-8 py-2 transition-opacity ${isSaving ? 'opacity-40 cursor-not-allowed' : ''}`}>{isSaving ? '保存中...' : '保存'}</button>
-                  <button onClick={handleUndo} disabled={isSaving} aria-disabled={isSaving} className={`text-pink-500 font-medium text-lg px-8 py-2 ${isSaving ? 'opacity-40 cursor-not-allowed' : ''}`}>cancel</button>
+                  <button onClick={handleSave} disabled={isSaving} className={`text-blue-500 font-medium text-lg px-8 py-2 transition-opacity ${isSaving ? 'opacity-40 cursor-not-allowed' : ''}`}>{isSaving ? '保存中...' : '保存'}</button>
+                  <button onClick={handleUndo} disabled={isSaving} className={`text-pink-500 font-medium text-lg px-8 py-2 ${isSaving ? 'opacity-40 cursor-not-allowed' : ''}`}>cancel</button>
                 </div>
               </div>
             </div>
@@ -1604,7 +1619,7 @@
 
           <div className="flex-1 overflow-y-auto p-2" ref={timelineRef}>
             <div className="space-y-0 text-sm pb-4">
-              {timeline.map((inn, idx) => (
+              {(timeline || []).map((inn, idx) => (
                 <div key={idx} className="flex relative items-center py-2 border-b border-[#1D5C45] min-h-[40px]">
                   <div className="absolute w-full h-[1px] bg-[#1D5C45] top-1/2 transform -translate-y-1/2 z-0"></div>
                   
@@ -1704,6 +1719,10 @@
 
       useEffect(() => {
         const restoreSession = async () => {
+          if (!_supabase) {
+            setIsLoadingSession(false);
+            return;
+          }
           try {
             const { data: { session } } = await _supabase.auth.getSession();
             if (session) {
@@ -1731,12 +1750,7 @@
       useEffect(() => {
         try {
           window.sessionStorage.setItem(APP_STATE_KEY, JSON.stringify({
-            view,
-            p1Setup,
-            p2Setup,
-            matchMode,
-            registeredOpponent,
-            matchSnapshot
+            view, p1Setup, p2Setup, matchMode, registeredOpponent, matchSnapshot
           }));
         } catch (_error) {}
       }, [view, p1Setup, p2Setup, matchMode, registeredOpponent, matchSnapshot]);
@@ -1758,10 +1772,11 @@
 
       const handleLogout = async () => {
         clearSession();
-        await _supabase.auth.signOut();
+        if (_supabase) await _supabase.auth.signOut();
       };
 
       const saveUserData = async (nextData) => {
+        if (!_supabase) return false;
         const { data: { session } } = await _supabase.auth.getSession();
         if (!session) return false;
         try {
@@ -1917,7 +1932,7 @@
       if (isLoadingSession) return null;
 
       return (
-        <>
+        <React.Fragment>
           {view === 'HOME' && <HomeScreen onNewMatch={handleOpenNewMatch} onViewMatchData={() => setView('HISTORY')} onViewPersonalData={() => setView('PERSONAL_DATA')} loggedInUser={loggedInUser} loggedInPin={loggedInPin} onAuthSuccess={handleAuthSuccess} onLogout={handleLogout} onNameChangeSuccess={handleNameChangeSuccess} onPinChangeSuccess={handlePinChangeSuccess} />}
           {view === 'MATCH_TYPE' && <MatchTypeScreen onBack={() => setView('HOME')} onGuest={handleSelectGuestMatch} onRegistered={handleSelectRegisteredMatch} />}
           {view === 'OPPONENT_AUTH' && <OpponentAuthScreen onBack={() => setView('MATCH_TYPE')} onSubmit={handleRegisteredOpponentSubmit} />}
@@ -1934,21 +1949,23 @@
           {view === 'MATCH' && <MatchScreen p1Setup={p1Setup} p2Setup={p2Setup} onBack={handleBackToSetup} onSaveMatch={handleSaveMatch} initialMatchState={matchSnapshot} onMatchStateChange={setMatchSnapshot} />}
           {view === 'HISTORY' && <HistoryScreen onBack={() => setView('HOME')} loggedInUser={loggedInUser} matchHistory={userData.matchHistory || []} onDeleteMatches={handleDeleteMatches} />}
           {view === 'PERSONAL_DATA' && <PersonalDataScreen onBack={() => setView('HOME')} loggedInUser={loggedInUser} matchHistory={userData.matchHistory || []} />}
-        </>
+        </React.Fragment>
       );
     };
 
     const root = ReactDOM.createRoot(document.getElementById('root'));
-    if (!isSupabaseConfigured) {
+    
+    // 安全装置: URLが置き換わっていないか、Supabaseが読み込めていない場合はエラー画面を出す
+    if (!isSupabaseConfigured || !window.supabase) {
       root.render(
         <div className="flex flex-col items-center justify-center h-[100dvh] bg-[#0F4C3A] text-white text-center p-8">
           <p className="text-5xl mb-4">⚠️</p>
-          <h2 className="text-xl font-bold mb-4">Supabase の設定が必要です</h2>
-          <p className="text-sm text-gray-300 leading-relaxed">
-            jpa-score.html の <strong>SUPABASE_URL</strong> と <strong>SUPABASE_ANON_KEY</strong> を<br />
-            実際のプロジェクトの値に置き換えてください。
+          <h2 className="text-xl font-bold mb-4">初期化エラー</h2>
+          <p className="text-sm text-gray-300 leading-relaxed mb-4">
+            {!window.supabase 
+              ? "データベースとの通信スクリプトが読み込めませんでした。広告ブロッカー（Braveなど）やトラッキング防止機能をオフにして再読み込みしてください。" 
+              : "GitHub Actions による自動設定が完了していません。デプロイ処理が終わるのをお待ちください。"}
           </p>
-          <p className="text-xs text-gray-400 mt-4">詳しくは supabase-setup.sql のコメントを参照してください。</p>
         </div>
       );
     } else {
