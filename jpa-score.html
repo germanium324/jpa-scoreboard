@@ -15,7 +15,6 @@
     input[type=range] { -webkit-appearance: none; background: transparent; }
     input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 20px; width: 20px; border-radius: 50%; background: #10B981; cursor: pointer; margin-top: -8px; box-shadow: 0 0 5px rgba(0,0,0,0.5); border: 2px solid white; }
     input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 4px; cursor: pointer; background: #2A6552; border-radius: 2px; }
-    .graph-line { stroke: white; stroke-width: 1; fill: none; stroke-linejoin: round; }
   </style>
 </head>
 <body>
@@ -26,16 +25,13 @@
 
     // =====================================================
     // Supabase 設定
-    // GitHub Actions がビルド時に自動的にここを書き換えます
     // =====================================================
     const SUPABASE_URL = 'YOUR_SUPABASE_PROJECT_URL';
     const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
     const isSupabaseConfigured =
       SUPABASE_URL !== 'YOUR_SUPABASE_PROJECT_URL' &&
       SUPABASE_ANON_KEY !== 'YOUR_SUPABASE_ANON_KEY';
-    // =====================================================
 
-    // 通信ブロック対策: window.supabase が読み込めているか安全に確認
     let _supabase = null;
     if (isSupabaseConfigured && window.supabase) {
       _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -44,13 +40,11 @@
     const EMPTY_USER_DATA = { matchHistory: [], playerDict: {} };
     const APP_STATE_KEY = 'jpa-scoreboard-app-state-v1';
 
-    // ローカルストレージ安全読み込み（JSONパースエラーによるクラッシュ防止）
     const safeJsonParse = (key, fallback) => {
       try {
         const val = localStorage.getItem(key);
         return val ? JSON.parse(val) : fallback;
       } catch (e) {
-        console.warn(`Failed to parse ${key}`, e);
         return fallback;
       }
     };
@@ -67,13 +61,11 @@
       }
     };
 
-    // プレイヤー名を Supabase auth 用の合成メールアドレスに変換する
     const legacyNameToEmail = (name) => {
       const bytes = new TextEncoder().encode(name.trim());
       let binary = '';
       bytes.forEach(b => { binary += String.fromCharCode(b); });
-      const encoded = btoa(binary)
-        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+      const encoded = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
       return `u_${encoded}@jpa-scoreboard.app`;
     };
 
@@ -101,7 +93,6 @@
         if (!error && data?.user) return { data, error: null };
         lastError = error;
       }
-
       return { data: null, error: lastError };
     };
 
@@ -120,12 +111,7 @@
     const createTransientClient = () => {
       if (!window.supabase) throw new Error("Supabase script is blocked.");
       return window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-        auth: {
-          storageKey: 'jpa-scoreboard-transient-auth',
-          persistSession: false,
-          autoRefreshToken: false,
-          detectSessionInUrl: false
-        }
+        auth: { storageKey: 'jpa-scoreboard-transient-auth', persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
       });
     };
 
@@ -147,19 +133,12 @@
         const ts = Number(match.endTime || match.startTime || 0);
         const p1 = match.p1 || {};
         const p2 = match.p2 || {};
-        if (p1.name === playerName && Number.isFinite(Number(p1.sl)) && ts >= latestTs) {
-          latestTs = ts;
-          latestSkill = Number(p1.sl);
-        }
-        if (p2.name === playerName && Number.isFinite(Number(p2.sl)) && ts >= latestTs) {
-          latestTs = ts;
-          latestSkill = Number(p2.sl);
-        }
+        if (p1.name === playerName && Number.isFinite(Number(p1.sl)) && ts >= latestTs) { latestTs = ts; latestSkill = Number(p1.sl); }
+        if (p2.name === playerName && Number.isFinite(Number(p2.sl)) && ts >= latestTs) { latestTs = ts; latestSkill = Number(p2.sl); }
       });
 
       if (latestSkill !== null) return toSkill(latestSkill, fallback);
-      const dictSkill = safeData.playerDict && safeData.playerDict[playerName];
-      return toSkill(dictSkill, fallback);
+      return toSkill(safeData.playerDict && safeData.playerDict[playerName], fallback);
     };
 
     const renameInUserData = (data, oldName, newName) => {
@@ -167,12 +146,8 @@
       const nextHistory = (Array.isArray(safeData.matchHistory) ? safeData.matchHistory : []).map((match) => {
         if (!match || typeof match !== 'object') return match;
         const nextMatch = { ...match };
-        if (nextMatch.p1?.name === oldName) {
-          nextMatch.p1 = { ...(nextMatch.p1 || {}), name: newName };
-        }
-        if (nextMatch.p2?.name === oldName) {
-          nextMatch.p2 = { ...(nextMatch.p2 || {}), name: newName };
-        }
+        if (nextMatch.p1?.name === oldName) nextMatch.p1 = { ...(nextMatch.p1 || {}), name: newName };
+        if (nextMatch.p2?.name === oldName) nextMatch.p2 = { ...(nextMatch.p2 || {}), name: newName };
         return nextMatch;
       });
       const prevDict = safeData.playerDict && typeof safeData.playerDict === 'object' ? safeData.playerDict : {};
@@ -196,30 +171,18 @@
       return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
     };
 
-    const SL_GOALS = {
-      1: 14, 2: 19, 3: 25, 4: 31, 5: 38,
-      6: 46, 7: 55, 8: 65, 9: 75
-    };
+    const SL_GOALS = { 1: 14, 2: 19, 3: 25, 4: 31, 5: 38, 6: 46, 7: 55, 8: 65, 9: 75 };
 
     const getTeamPoints = (loserSL, loserScore) => {
       const thresholds = {
-        1: [2, 3, 4, 6, 7, 8, 10, 11, 13],
-        2: [3, 5, 7, 8, 10, 12, 14, 16, 18],
-        3: [4, 6, 9, 11, 14, 16, 19, 21, 24],
-        4: [5, 8, 11, 14, 18, 21, 24, 27, 30],
-        5: [6, 10, 14, 18, 22, 26, 29, 33, 37],
-        6: [8, 12, 17, 22, 27, 31, 36, 40, 45],
-        7: [10, 15, 21, 26, 32, 37, 43, 49, 54],
-        8: [13, 19, 26, 32, 39, 45, 52, 58, 64],
-        9: [17, 24, 31, 38, 46, 53, 60, 67, 74]
+        1: [2, 3, 4, 6, 7, 8, 10, 11, 13], 2: [3, 5, 7, 8, 10, 12, 14, 16, 18], 3: [4, 6, 9, 11, 14, 16, 19, 21, 24],
+        4: [5, 8, 11, 14, 18, 21, 24, 27, 30], 5: [6, 10, 14, 18, 22, 26, 29, 33, 37], 6: [8, 12, 17, 22, 27, 31, 36, 40, 45],
+        7: [10, 15, 21, 26, 32, 37, 43, 49, 54], 8: [13, 19, 26, 32, 39, 45, 52, 58, 64], 9: [17, 24, 31, 38, 46, 53, 60, 67, 74]
       };
       const limits = thresholds[loserSL] || thresholds[6];
       let loserPts = 8;
       for (let i = 0; i < limits.length; i++) {
-        if (loserScore <= limits[i]) {
-          loserPts = i;
-          break;
-        }
+        if (loserScore <= limits[i]) { loserPts = i; break; }
       }
       return { winner: 20 - loserPts, loser: loserPts };
     };
@@ -234,15 +197,13 @@
           if (action.type === 'safety') { safeties++; currentRun = 0; }
           if (action.type === 'switch') { misses++; currentRun = 0; }
           if (action.type === 'pot') {
-            pots++;
-            if (action.ball === 9) nineBalls++;
+            pots++; if (action.ball === 9) nineBalls++;
             currentRun += (action.ball === 9 ? 2 : 1);
             if (currentRun > maxRun) maxRun = currentRun;
           }
           if (action.type === 'dead') { misses++; deads++; currentRun = 0; }
         });
       });
-      
       const totalShots = pots + misses;
       const accuracy = totalShots === 0 ? 0 : Math.round((pots / totalShots) * 100);
       return { pots, misses, safeties, breaks, nineBalls, maxRun, accuracy, deads };
@@ -267,7 +228,7 @@
     // ==========================================
     // ホーム画面
     // ==========================================
-    const HomeScreen = ({ onNewMatch, onViewMatchData, onViewPersonalData, loggedInUser, loggedInPin, onAuthSuccess, onLogout, onNameChangeSuccess, onPinChangeSuccess }) => {
+    const HomeScreen = ({ onNewMatch, onViewMatchData, onViewPersonalData, loggedInUser, setLoggedInUser, loggedInPin, onAuthSuccess, onLogout, onNameChangeSuccess, onPinChangeSuccess }) => {
       const [showAuthModal, setShowAuthModal] = useState(false);
       const [authMode, setAuthMode] = useState('LOGIN');
       const [authName, setAuthName] = useState('');
@@ -290,19 +251,14 @@
           const { data, error } = await signInWithNameAndPin(_supabase, loggedInUser, loggedInPin);
           if (!error && data?.session) return data.session;
         }
-
         throw new Error('認証セッションが切れました。いったんログアウトして再ログインしてください。');
       };
 
       const handleAuth = async () => {
         if (!authName.trim() || !/^\d{4}$/.test(authPin)) {
-          alert('名前と4桁の数字パスワードを入力してください。');
-          return;
+          alert('名前と4桁の数字パスワードを入力してください。'); return;
         }
-        if (!_supabase) {
-          alert('データベース通信がブロックされているためログインできません。');
-          return;
-        }
+        if (!_supabase) { alert('通信エラーです。リロードしてください。'); return; }
 
         setIsSubmitting(true);
         try {
@@ -312,48 +268,21 @@
 
           if (authMode === 'REGISTER') {
             const isAvail = await isNameAvailable(trimmedName);
-            if (!isAvail) {
-              throw new Error('この名前は既に登録されています。');
-            }
-            const { data, error } = await _supabase.auth.signUp({
-              email,
-              password,
-              options: { data: { display_name: trimmedName } }
-            });
-            if (error) {
-              if (error.code === 'user_already_exists' || error.message.toLowerCase().includes('already registered')) {
-                throw new Error('この名前は既に登録されています。');
-              }
-              throw new Error(error.message);
-            }
-            if (data.user && !data.session) {
-              throw new Error('メール確認が必要です。Supabaseダッシュボードの Authentication > Settings でメール確認を無効にしてください。');
-            }
-            const { error: upsertError } = await _supabase
-              .from('user_data')
-              .upsert({ id: data.user.id, match_history: [], player_dict: {} });
-            if (upsertError) {
-              await _supabase.auth.signOut();
-              throw new Error('ユーザーデータの作成に失敗しました。もう一度お試しください。');
-            }
+            if (!isAvail) throw new Error('この名前は既に登録されています。');
+            const { data, error } = await _supabase.auth.signUp({ email, password, options: { data: { display_name: trimmedName } } });
+            if (error) throw new Error(error.message);
+            const { error: upsertError } = await _supabase.from('user_data').upsert({ id: data.user.id, match_history: [], player_dict: {} });
+            if (upsertError) { await _supabase.auth.signOut(); throw new Error('データ作成に失敗しました。'); }
             onAuthSuccess({ name: trimmedName, pin: authPin, data: EMPTY_USER_DATA });
             setShowAuthModal(false);
             alert('登録が完了し、ログインしました。');
           } else {
             const { data, error } = await signInWithNameAndPin(_supabase, trimmedName, authPin);
             if (error) throw new Error('プレイヤー名またはパスワードが間違っています。');
-            const { data: dbData } = await _supabase
-              .from('user_data')
-              .select('match_history, player_dict')
-              .eq('id', data.user.id)
-              .single();
+            const { data: dbData } = await _supabase.from('user_data').select('match_history, player_dict').eq('id', data.user.id).single();
             onAuthSuccess({
-              name: trimmedName,
-              pin: authPin,
-              data: {
-                matchHistory: dbData?.match_history || [],
-                playerDict: dbData?.player_dict || {}
-              }
+              name: trimmedName, pin: authPin,
+              data: { matchHistory: dbData?.match_history || [], playerDict: dbData?.player_dict || {} }
             });
             setShowAuthModal(false);
           }
@@ -364,72 +293,31 @@
         }
       };
 
-      const handleLogout = async () => {
-        await onLogout();
-        setShowAuthModal(false);
-      };
+      const handleLogout = async () => { await onLogout(); setShowAuthModal(false); };
 
       const handleNameChange = async () => {
         const trimmedName = newName.trim();
-        if (!trimmedName) {
-          alert('名前を入力してください。');
-          return;
-        }
-        if (trimmedName === loggedInUser) {
-          alert('現在の名前と同じです。');
-          return;
-        }
+        if (!trimmedName) { alert('名前を入力してください。'); return; }
+        if (trimmedName === loggedInUser) { alert('現在の名前と同じです。'); return; }
         setIsProcessing(true);
         try {
           const activeSession = await ensureActiveSession();
           const isAvail = await isNameAvailable(trimmedName);
-          if (!isAvail) {
-            throw new Error('この名前は既に登録されています。別の名前を選んでください。');
-          }
-          const { error: updateError } = await _supabase.auth.updateUser({
-            email: nameToEmail(trimmedName),
-            data: { display_name: trimmedName }
-          });
+          if (!isAvail) throw new Error('この名前は既に登録されています。');
+          const { error: updateError } = await _supabase.auth.updateUser({ email: nameToEmail(trimmedName), data: { display_name: trimmedName } });
           if (updateError) throw new Error(updateError.message);
+          
           const oldName = loggedInUser;
-          
-          const { error: rpcError } = await _supabase.rpc('rename_player_in_all_histories', {
-            old_name: oldName,
-            new_name: trimmedName
-          });
-          
-          const { data: dbData } = await _supabase
-            .from('user_data')
-            .select('match_history, player_dict')
-            .eq('id', activeSession.user.id)
-            .single();
-          const ownDataFromDb = {
-            matchHistory: dbData?.match_history || [],
-            playerDict: dbData?.player_dict || {}
-          };
+          const { error: rpcError } = await _supabase.rpc('rename_player_in_all_histories', { old_name: oldName, new_name: trimmedName });
+          const { data: dbData } = await _supabase.from('user_data').select('match_history, player_dict').eq('id', activeSession.user.id).single();
+          const ownDataFromDb = { matchHistory: dbData?.match_history || [], playerDict: dbData?.player_dict || {} };
           let nextOwnData = ownDataFromDb;
-          let upsertFailed = false;
           if (rpcError) {
             nextOwnData = renameInUserData(ownDataFromDb, oldName, trimmedName);
-            const { error: upsertError } = await _supabase
-              .from('user_data')
-              .upsert({
-                id: activeSession.user.id,
-                match_history: nextOwnData.matchHistory,
-                player_dict: nextOwnData.playerDict,
-                updated_at: new Date().toISOString()
-              });
-            if (upsertError) {
-              upsertFailed = true;
-              nextOwnData = ownDataFromDb;
-            }
+            await _supabase.from('user_data').upsert({ id: activeSession.user.id, match_history: nextOwnData.matchHistory, player_dict: nextOwnData.playerDict, updated_at: new Date().toISOString() });
           }
           onNameChangeSuccess(trimmedName, nextOwnData);
-          if (rpcError && upsertFailed) {
-            alert('名前は変更しましたが、履歴データの一部同期に失敗しました。');
-          } else {
-            alert('名前を変更しました。');
-          }
+          alert('名前を変更しました。');
           setSettingsView('MAIN');
         } catch (error) {
           alert(error.message);
@@ -439,10 +327,7 @@
       };
 
       const handlePinChange = async () => {
-        if (!/^\d{4}$/.test(newPin)) {
-          alert('4桁の数字を入力してください。');
-          return;
-        }
+        if (!/^\d{4}$/.test(newPin)) { alert('4桁の数字を入力してください。'); return; }
         setIsProcessing(true);
         try {
           await ensureActiveSession();
@@ -459,76 +344,42 @@
       };
 
       const handleProtectedData = (callback) => {
-        if (!loggedInUser) {
-          alert('左上のメニューからログインしてください。');
-        } else {
-          callback();
-        }
+        if (!loggedInUser) alert('左上のメニューからログインしてください。'); else callback();
       };
 
       return (
         <div className="flex flex-col h-[100dvh] max-w-md mx-auto bg-[#0F4C3A] relative items-center justify-center p-6">
           <button 
-            onClick={() => {
-              setAuthName('');
-              setAuthPin('');
-              setSettingsView('MAIN');
-              setShowAuthModal(true);
-            }}
+            onClick={() => { setAuthName(''); setAuthPin(''); setSettingsView('MAIN'); setShowAuthModal(true); }}
             className="absolute top-6 left-6 p-2 text-white active:scale-95 z-10"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
-
           <div className="absolute top-1/4">
             <h1 className="text-4xl font-bold text-white tracking-widest text-center">JPAスコア記録</h1>
             {loggedInUser && <p className="text-center text-green-300 mt-2 text-sm">{loggedInUser} でログイン中</p>}
           </div>
-          
           <div className="flex flex-col gap-6 mt-20">
-            <button 
-              onClick={onNewMatch}
-              className="w-64 bg-[#1A6E4F] border border-white py-4 rounded-xl text-2xl font-bold flex items-center justify-center shadow-lg active:scale-95 transition-transform text-white"
-            >
-              新規試合
-            </button>
-            <button 
-              onClick={() => handleProtectedData(onViewMatchData)}
-              className="w-64 bg-[#2A6552] border border-white py-4 rounded-xl text-2xl font-bold flex items-center justify-center shadow-lg active:scale-95 transition-transform text-white"
-            >
-              対戦データ
-            </button>
-            <button 
-              onClick={() => handleProtectedData(onViewPersonalData)}
-              className="w-64 bg-[#1D5C45] border border-white py-4 rounded-xl text-2xl font-bold flex items-center justify-center shadow-lg active:scale-95 transition-transform text-white"
-            >
-              個人データ
-            </button>
+            <button onClick={onNewMatch} className="w-64 bg-[#1A6E4F] border border-white py-4 rounded-xl text-2xl font-bold shadow-lg active:scale-95 transition-transform text-white">新規試合</button>
+            <button onClick={() => handleProtectedData(onViewMatchData)} className="w-64 bg-[#2A6552] border border-white py-4 rounded-xl text-2xl font-bold shadow-lg active:scale-95 transition-transform text-white">対戦データ</button>
+            <button onClick={() => handleProtectedData(onViewPersonalData)} className="w-64 bg-[#1D5C45] border border-white py-4 rounded-xl text-2xl font-bold shadow-lg active:scale-95 transition-transform text-white">個人データ</button>
           </div>
 
           {showAuthModal && (
             <div className="absolute inset-0 z-50 bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
               <div className="bg-white text-gray-800 rounded-2xl w-full p-6 shadow-2xl relative">
-                
                 {loggedInUser ? (
                   <div>
                     <h2 className="text-xl font-bold mb-4 text-center">アカウント設定</h2>
-
                     {settingsView === 'MAIN' && (
                       <div>
                         <p className="text-center text-gray-500 mb-5 text-sm"><strong className="text-gray-800">{loggedInUser}</strong> でログイン中</p>
                         <div className="space-y-2 mb-6">
-                          <button onClick={() => { setShowCurrentPin(false); setSettingsView('SHOW_PIN'); }} className="w-full text-left px-4 py-2 border border-gray-300 rounded text-gray-700 active:bg-gray-50">
-                            パスワードを確認
-                          </button>
-                          <button onClick={() => { setNewName(''); setSettingsView('NAME'); }} className="w-full text-left px-4 py-2 border border-gray-300 rounded text-gray-700 active:bg-gray-50">
-                            名前を変更
-                          </button>
-                          <button onClick={() => { setNewPin(''); setSettingsView('PIN'); }} className="w-full text-left px-4 py-2 border border-gray-300 rounded text-gray-700 active:bg-gray-50">
-                            パスワードを変更
-                          </button>
+                          <button onClick={() => { setShowCurrentPin(false); setSettingsView('SHOW_PIN'); }} className="w-full text-left px-4 py-2 border border-gray-300 rounded active:bg-gray-50">パスワードを確認</button>
+                          <button onClick={() => { setNewName(''); setSettingsView('NAME'); }} className="w-full text-left px-4 py-2 border border-gray-300 rounded active:bg-gray-50">名前を変更</button>
+                          <button onClick={() => { setNewPin(''); setSettingsView('PIN'); }} className="w-full text-left px-4 py-2 border border-gray-300 rounded active:bg-gray-50">パスワードを変更</button>
                         </div>
                         <div className="flex justify-around">
                           <button onClick={() => setShowAuthModal(false)} className="text-gray-500 font-medium px-4 py-2 border rounded">閉じる</button>
@@ -536,64 +387,36 @@
                         </div>
                       </div>
                     )}
-
                     {settingsView === 'SHOW_PIN' && (
                       <div>
                         <p className="text-center text-gray-500 text-sm mb-4">現在のパスワード（4桁）</p>
                         {loggedInPin ? (
                           <div className="flex items-center justify-center gap-3 mb-6">
-                            <span className="text-3xl font-bold tracking-widest text-gray-800">
-                              {showCurrentPin ? loggedInPin : '••••'}
-                            </span>
-                            <button onClick={() => setShowCurrentPin(!showCurrentPin)} className="text-blue-500 text-sm px-2 py-1 border border-blue-300 rounded">
-                              {showCurrentPin ? '隠す' : '表示'}
-                            </button>
+                            <span className="text-3xl font-bold tracking-widest text-gray-800">{showCurrentPin ? loggedInPin : '••••'}</span>
+                            <button onClick={() => setShowCurrentPin(!showCurrentPin)} className="text-blue-500 text-sm px-2 py-1 border border-blue-300 rounded">{showCurrentPin ? '隠す' : '表示'}</button>
                           </div>
-                        ) : (
-                          <p className="text-center text-gray-400 text-sm mb-6">再ログインするとパスワードを確認できます</p>
-                        )}
-                        <div className="flex justify-center">
-                          <button onClick={() => { setSettingsView('MAIN'); setShowCurrentPin(false); }} className="text-gray-500 font-medium px-4 py-2 border rounded">戻る</button>
-                        </div>
+                        ) : (<p className="text-center text-gray-400 text-sm mb-6">再ログインすると確認できます</p>)}
+                        <div className="flex justify-center"><button onClick={() => { setSettingsView('MAIN'); setShowCurrentPin(false); }} className="text-gray-500 border rounded px-4 py-2">戻る</button></div>
                       </div>
                     )}
-
                     {settingsView === 'NAME' && (
                       <div>
                         <p className="text-sm text-gray-500 mb-1 text-center">現在の名前: <strong>{loggedInUser}</strong></p>
-                        <p className="text-xs text-gray-400 mb-4 text-center">新しい名前（既存の名前は使用不可）</p>
-                        <input
-                          type="text"
-                          value={newName}
-                          onChange={(e) => setNewName(e.target.value)}
-                          className="w-full border border-gray-300 rounded px-3 py-2 outline-none focus:border-green-500 mb-4"
-                          placeholder="新しい名前を入力"
-                        />
+                        <p className="text-xs text-gray-400 mb-4 text-center">新しい名前</p>
+                        <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} className="w-full border border-gray-300 rounded px-3 py-2 mb-4" placeholder="新しい名前を入力" />
                         <div className="flex justify-around">
-                          <button onClick={() => setSettingsView('MAIN')} disabled={isProcessing} className="text-gray-500 font-medium px-4 py-2">キャンセル</button>
-                          <button onClick={handleNameChange} disabled={isProcessing} className={`text-green-600 font-medium px-4 py-2 border border-green-600 rounded ${isProcessing ? 'opacity-50' : ''}`}>
-                            {isProcessing ? '変更中...' : '変更する'}
-                          </button>
+                          <button onClick={() => setSettingsView('MAIN')} disabled={isProcessing} className="text-gray-500 px-4 py-2">キャンセル</button>
+                          <button onClick={handleNameChange} disabled={isProcessing} className={`text-green-600 border border-green-600 rounded px-4 py-2 ${isProcessing ? 'opacity-50' : ''}`}>{isProcessing ? '変更中...' : '変更する'}</button>
                         </div>
                       </div>
                     )}
-
                     {settingsView === 'PIN' && (
                       <div>
                         <p className="text-sm text-gray-500 mb-4 text-center">新しいパスワード（4桁の数字）</p>
-                        <input
-                          type="password"
-                          maxLength="4"
-                          value={newPin}
-                          onChange={(e) => setNewPin(e.target.value.replace(/[^\d]/g, '').slice(0, 4))}
-                          className="w-full border border-gray-300 rounded px-3 py-2 outline-none focus:border-green-500 mb-4"
-                          placeholder="新しい4桁のパスワード"
-                        />
+                        <input type="password" maxLength="4" value={newPin} onChange={(e) => setNewPin(e.target.value.replace(/[^\d]/g, '').slice(0, 4))} className="w-full border border-gray-300 rounded px-3 py-2 mb-4" placeholder="新しい4桁のパスワード" />
                         <div className="flex justify-around">
-                          <button onClick={() => setSettingsView('MAIN')} disabled={isProcessing} className="text-gray-500 font-medium px-4 py-2">キャンセル</button>
-                          <button onClick={handlePinChange} disabled={isProcessing} className={`text-green-600 font-medium px-4 py-2 border border-green-600 rounded ${isProcessing ? 'opacity-50' : ''}`}>
-                            {isProcessing ? '変更中...' : '変更する'}
-                          </button>
+                          <button onClick={() => setSettingsView('MAIN')} disabled={isProcessing} className="text-gray-500 px-4 py-2">キャンセル</button>
+                          <button onClick={handlePinChange} disabled={isProcessing} className={`text-green-600 border border-green-600 rounded px-4 py-2 ${isProcessing ? 'opacity-50' : ''}`}>{isProcessing ? '変更中...' : '変更する'}</button>
                         </div>
                       </div>
                     )}
@@ -601,49 +424,21 @@
                 ) : (
                   <div>
                     <div className="flex justify-center mb-4 border-b border-gray-200">
-                      <button 
-                        className={`flex-1 pb-2 font-bold ${authMode === 'LOGIN' ? 'text-green-600 border-b-2 border-green-600' : 'text-gray-400'}`}
-                        onClick={() => setAuthMode('LOGIN')}
-                      >
-                        ログイン
-                      </button>
-                      <button 
-                        className={`flex-1 pb-2 font-bold ${authMode === 'REGISTER' ? 'text-green-600 border-b-2 border-green-600' : 'text-gray-400'}`}
-                        onClick={() => setAuthMode('REGISTER')}
-                      >
-                        新規登録
-                      </button>
+                      <button className={`flex-1 pb-2 font-bold ${authMode === 'LOGIN' ? 'text-green-600 border-b-2 border-green-600' : 'text-gray-400'}`} onClick={() => setAuthMode('LOGIN')}>ログイン</button>
+                      <button className={`flex-1 pb-2 font-bold ${authMode === 'REGISTER' ? 'text-green-600 border-b-2 border-green-600' : 'text-gray-400'}`} onClick={() => setAuthMode('REGISTER')}>新規登録</button>
                     </div>
-                    
-                    <p className="text-xs text-gray-500 mb-4 text-center">
-                      {authMode === 'LOGIN' ? '登録したプレイヤー名とパスワードを入力' : '新しいプレイヤー名とパスワードを登録'}
-                    </p>
+                    <p className="text-xs text-gray-500 mb-4 text-center">{authMode === 'LOGIN' ? '登録したプレイヤー名とパスワードを入力' : '新しいプレイヤー名とパスワードを登録'}</p>
                     <div className="mb-4">
                       <label className="block text-sm font-medium text-gray-700 mb-1">プレイヤー名</label>
-                      <input 
-                        type="text" 
-                        value={authName}
-                        onChange={(e) => setAuthName(e.target.value)}
-                        className="w-full border border-gray-300 rounded px-3 py-2 outline-none focus:border-green-500"
-                        placeholder="名前を入力"
-                      />
+                      <input type="text" value={authName} onChange={(e) => setAuthName(e.target.value)} className="w-full border border-gray-300 rounded px-3 py-2" placeholder="名前を入力" />
                     </div>
                     <div className="mb-6">
                       <label className="block text-sm font-medium text-gray-700 mb-1">パスワード（数字4桁）</label>
-                      <input 
-                        type="password" 
-                        maxLength="4"
-                        value={authPin}
-                        onChange={(e) => setAuthPin(e.target.value.replace(/[^\d]/g, '').slice(0, 4))}
-                        className="w-full border border-gray-300 rounded px-3 py-2 outline-none focus:border-green-500"
-                        placeholder="1234"
-                      />
+                      <input type="password" maxLength="4" value={authPin} onChange={(e) => setAuthPin(e.target.value.replace(/[^\d]/g, '').slice(0, 4))} className="w-full border border-gray-300 rounded px-3 py-2" placeholder="1234" />
                     </div>
                     <div className="flex justify-around">
                       <button onClick={() => setShowAuthModal(false)} className="text-gray-500 font-medium px-4 py-2">キャンセル</button>
-                      <button onClick={handleAuth} disabled={isSubmitting} className={`text-green-600 font-medium px-4 py-2 border border-green-600 rounded ${isSubmitting ? 'opacity-50' : ''}`}>
-                        {authMode === 'LOGIN' ? 'ログイン' : '登録'}
-                      </button>
+                      <button onClick={handleAuth} disabled={isSubmitting} className={`text-green-600 font-medium px-4 py-2 border border-green-600 rounded ${isSubmitting ? 'opacity-50' : ''}`}>{authMode === 'LOGIN' ? 'ログイン' : '登録'}</button>
                     </div>
                   </div>
                 )}
@@ -671,43 +466,17 @@
         setHistoryData(filteredData);
       }, [loggedInUser, matchHistory]);
 
-      const toggleDeleteMode = () => {
-        setIsDeleteMode((prev) => {
-          const next = !prev;
-          if (!next) setSelectedForDelete([]);
-          return next;
-        });
-      };
-
-      const toggleDeleteSelection = (startTime) => {
-        setSelectedForDelete((prev) => (
-          prev.includes(startTime)
-            ? prev.filter((ts) => ts !== startTime)
-            : [...prev, startTime]
-        ));
-      };
-
-      const handleCardClick = (match) => {
-        if (isDeleteMode) {
-          toggleDeleteSelection(match.startTime);
-          return;
-        }
-        setSelectedMatch(match);
-      };
-
+      const toggleDeleteMode = () => { setIsDeleteMode(p => { const next = !p; if (!next) setSelectedForDelete([]); return next; }); };
+      const toggleDeleteSelection = (startTime) => { setSelectedForDelete(p => p.includes(startTime) ? p.filter(ts => ts !== startTime) : [...p, startTime]); };
+      const handleCardClick = (match) => { if (isDeleteMode) { toggleDeleteSelection(match.startTime); return; } setSelectedMatch(match); };
       const handleBulkDelete = async () => {
         if (!selectedForDelete.length || isDeleting) return;
-        const shouldDelete = window.confirm(`${selectedForDelete.length}件のデータを削除しますか？`);
-        if (!shouldDelete) return;
+        if (!window.confirm(`${selectedForDelete.length}件のデータを削除しますか？`)) return;
         setIsDeleting(true);
         const deleted = await onDeleteMatches(selectedForDelete);
         setIsDeleting(false);
-        if (!deleted) {
-          alert('削除に失敗しました。');
-          return;
-        }
-        setSelectedForDelete([]);
-        setIsDeleteMode(false);
+        if (!deleted) { alert('削除に失敗しました。'); return; }
+        setSelectedForDelete([]); setIsDeleteMode(false);
       };
 
       const StatRow = ({ label, v1, v2 }) => (
@@ -727,74 +496,47 @@
                   <span>{formatDate(selectedMatch.endTime || selectedMatch.startTime)}</span>
                   <span>{formatTime(selectedMatch.startTime)}-{selectedMatch.endTime ? formatTime(selectedMatch.endTime) : ''}</span>
                 </div>
-                
                 <div className="flex justify-between items-center mb-2">
                   <div className="text-center flex-1">
                     <p className={`text-xl font-bold ${selectedMatch.winner === 1 ? 'text-pink-500' : 'text-gray-500'}`}>{selectedMatch.winner === 1 ? 'Win!' : 'Lose..'}</p>
                     <p className="text-sm text-gray-600 mt-1">{selectedMatch.p1.name} (SL:{selectedMatch.p1.sl})</p>
-                    <p className="mt-1">
-                      <span className="text-5xl font-normal text-gray-800">{selectedMatch.p1.score}</span>
-                      <span className="text-lg text-gray-500 font-medium">/{selectedMatch.p1.goal}</span>
-                    </p>
+                    <p className="mt-1"><span className="text-5xl font-normal text-gray-800">{selectedMatch.p1.score}</span><span className="text-lg text-gray-500 font-medium">/{selectedMatch.p1.goal}</span></p>
                   </div>
                   <div className="text-center flex-1">
                     <p className={`text-xl font-bold ${selectedMatch.winner === 2 ? 'text-pink-500' : 'text-gray-500'}`}>{selectedMatch.winner === 2 ? 'Win!' : 'Lose..'}</p>
                     <p className="text-sm text-gray-600 mt-1">{selectedMatch.p2.name} (SL:{selectedMatch.p2.sl})</p>
-                    <p className="mt-1">
-                      <span className="text-5xl font-normal text-gray-800">{selectedMatch.p2.score}</span>
-                      <span className="text-lg text-gray-500 font-medium">/{selectedMatch.p2.goal}</span>
-                    </p>
+                    <p className="mt-1"><span className="text-5xl font-normal text-gray-800">{selectedMatch.p2.score}</span><span className="text-lg text-gray-500 font-medium">/{selectedMatch.p2.goal}</span></p>
                   </div>
                 </div>
-                
                 <p className="text-center text-lg font-medium text-gray-800">チーム得点: {selectedMatch.p1TeamPts}-{selectedMatch.p2TeamPts}</p>
                 <p className="text-center text-sm font-medium text-gray-500 mb-4">イニング : {selectedMatch.inning}</p>
-                
                 <div className="border-t border-gray-200 py-3 space-y-1">
                   <StatRow label="セーフティー" v1={selectedMatch.p1Stats?.safeties || 0} v2={selectedMatch.p2Stats?.safeties || 0} />
                   <StatRow label="シュート精度" v1={`${selectedMatch.p1Stats?.accuracy || 0}%`} v2={`${selectedMatch.p2Stats?.accuracy || 0}%`} />
                   <StatRow label="ブレイク回数" v1={selectedMatch.p1Stats?.breaks || 0} v2={selectedMatch.p2Stats?.breaks || 0} />
                   <StatRow label="最大連続得点" v1={selectedMatch.p1Stats?.maxRun || 0} v2={selectedMatch.p2Stats?.maxRun || 0} />
                 </div>
-                
                 <div className="flex justify-around mt-4 pt-2">
                   <button onClick={() => setSelectedMatch(null)} className="text-blue-500 font-medium text-lg px-8 py-2">閉じる</button>
                 </div>
               </div>
             </div>
           )}
-
           <header className="flex items-center justify-between p-4 border-b border-[#2A6552]">
             <span className="text-xl cursor-pointer" onClick={onBack}>&lt; 戻る</span>
             <h1 className="text-xl font-bold">対戦データ</h1>
-            <button
-              onClick={toggleDeleteMode}
-              className={`text-sm font-bold px-3 py-1 rounded border ${isDeleteMode ? 'border-gray-300 text-gray-200' : 'border-pink-400 text-pink-300'}`}
-            >
-              {isDeleteMode ? '完了' : '削除'}
-            </button>
+            <button onClick={toggleDeleteMode} className={`text-sm font-bold px-3 py-1 rounded border ${isDeleteMode ? 'border-gray-300 text-gray-200' : 'border-pink-400 text-pink-300'}`}>{isDeleteMode ? '完了' : '削除'}</button>
           </header>
-          
           <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${isDeleteMode ? 'pb-32' : ''}`}>
             {historyData.length === 0 ? (
               <p className="text-center text-gray-400 mt-10">保存された試合データはありません。</p>
             ) : (
               historyData.map((match, idx) => (
-                <div 
-                  key={idx} 
-                  onClick={() => handleCardClick(match)}
-                  className={`relative bg-[#1D5C45] p-4 rounded-xl shadow-md border cursor-pointer active:scale-[0.98] transition-transform ${selectedForDelete.includes(match.startTime) ? 'border-pink-400' : 'border-[#2A6552]'}`}
-                >
-                  {isDeleteMode && (
-                    <div className="absolute top-3 right-3 pointer-events-none">
-                      <div className={`w-5 h-5 rounded-full border-2 ${selectedForDelete.includes(match.startTime) ? 'border-pink-300 bg-pink-400' : 'border-gray-200'}`} />
-                    </div>
-                  )}
+                <div key={idx} onClick={() => handleCardClick(match)} className={`relative bg-[#1D5C45] p-4 rounded-xl shadow-md border cursor-pointer active:scale-[0.98] transition-transform ${selectedForDelete.includes(match.startTime) ? 'border-pink-400' : 'border-[#2A6552]'}`}>
+                  {isDeleteMode && (<div className="absolute top-3 right-3 pointer-events-none"><div className={`w-5 h-5 rounded-full border-2 ${selectedForDelete.includes(match.startTime) ? 'border-pink-300 bg-pink-400' : 'border-gray-200'}`} /></div>)}
                   <div className="flex justify-between text-xs text-gray-300 mb-3 border-b border-[#2A6552] pb-2 pointer-events-none">
-                    <span>{formatDate(match.startTime)}</span>
-                    <span>{formatTime(match.startTime)} - {formatTime(match.endTime)}</span>
+                    <span>{formatDate(match.startTime)}</span><span>{formatTime(match.startTime)} - {formatTime(match.endTime)}</span>
                   </div>
-                  
                   <div className="flex justify-between items-center mb-2 pointer-events-none">
                     <div className={`text-center flex-1 ${match.winner === 1 ? 'text-pink-400 font-bold' : ''}`}>
                       <p className="text-xs truncate">{match.p1?.name} (SL:{match.p1?.sl})</p>
@@ -806,7 +548,6 @@
                       <p className="text-3xl mt-1">{match.p2?.score}<span className="text-sm text-gray-400 font-normal">/{match.p2?.goal}</span></p>
                     </div>
                   </div>
-                  
                   <div className="text-center mt-3 pt-2 border-t border-[#2A6552] text-sm font-medium pointer-events-none">
                     チーム得点: {match.p1TeamPts || 0} - {match.p2TeamPts || 0}
                   </div>
@@ -814,17 +555,10 @@
               ))
             )}
           </div>
-
           {isDeleteMode && (
             <div className="absolute bottom-0 left-0 right-0 bg-[#0A3A2D] border-t border-[#2A6552] px-3 pt-3 flex items-center gap-3" style={{paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.75rem)'}}>
               <p className="text-sm text-gray-200 flex-1">選択中: {selectedForDelete.length}件</p>
-              <button
-                onClick={handleBulkDelete}
-                disabled={!selectedForDelete.length || isDeleting}
-                className={`px-4 py-2 rounded-lg font-bold ${selectedForDelete.length && !isDeleting ? 'bg-pink-500 text-white' : 'bg-gray-500 text-gray-200 opacity-70'}`}
-              >
-                {isDeleting ? '削除中...' : '選択削除'}
-              </button>
+              <button onClick={handleBulkDelete} disabled={!selectedForDelete.length || isDeleting} className={`px-4 py-2 rounded-lg font-bold ${selectedForDelete.length && !isDeleting ? 'bg-pink-500 text-white' : 'bg-gray-500 text-gray-200 opacity-70'}`}>{isDeleting ? '削除中...' : '選択削除'}</button>
             </div>
           )}
         </div>
@@ -835,25 +569,14 @@
     // 個人データ画面
     // ==========================================
     const PersonalDataScreen = ({ onBack, loggedInUser, matchHistory }) => {
-      const [stats, setStats] = useState({
-        matches: 0, winRate: 0, accuracy: 0, maxRun: 0, masuwari: 0, graphData: []
-      });
+      const [stats, setStats] = useState({ matches: 0, winRate: 0, accuracy: 0, maxRun: 0, masuwari: 0, graphData: [] });
 
       useEffect(() => {
         const safeData = Array.isArray(matchHistory) ? matchHistory : [];
         const userMatches = safeData.filter(m => m && m.p1 && m.p2 && (m.p1.name === loggedInUser || m.p2.name === loggedInUser));
-        
-        if (userMatches.length === 0) {
-          setStats({ matches: 0, winRate: 0, accuracy: 0, maxRun: 0, masuwari: 0, graphData: [] });
-          return;
-        }
+        if (userMatches.length === 0) { setStats({ matches: 0, winRate: 0, accuracy: 0, maxRun: 0, masuwari: 0, graphData: [] }); return; }
 
-        let totalWins = 0;
-        let totalPots = 0;
-        let totalShots = 0;
-        let overallMaxRun = 0;
-        let masuwariCount = 0;
-        
+        let totalWins = 0, totalPots = 0, totalShots = 0, overallMaxRun = 0, masuwariCount = 0;
         const gData = [];
 
         userMatches.forEach(m => {
@@ -862,10 +585,8 @@
           const pStats = (isP1 ? m.p1Stats : m.p2Stats) || { pots: 0, misses: 0, maxRun: 0 };
 
           if ((isP1 && m.winner === 1) || (!isP1 && m.winner === 2)) totalWins++;
-          
           totalPots += (pStats.pots || 0);
           totalShots += ((pStats.pots || 0) + (pStats.misses || 0));
-          
           if ((pStats.maxRun || 0) > overallMaxRun) overallMaxRun = pStats.maxRun;
 
           (m.timeline || []).forEach(inn => {
@@ -875,43 +596,23 @@
             const hasSwitch = actions.some(a => a.type === 'switch');
             const hasDead = actions.some(a => a.type === 'dead');
             const hasSafety = actions.some(a => a.type === 'safety');
-            
-            if (hasBreak && pots >= 9 && !hasSwitch && !hasDead && !hasSafety) {
-              masuwariCount++;
-            }
+            if (hasBreak && pots >= 9 && !hasSwitch && !hasDead && !hasSafety) masuwariCount++;
           });
 
           const score = isP1 ? (m.p1?.score || 0) : (m.p2?.score || 0);
           const innCount = Math.max(m.inning || 1, 1);
-          gData.push({
-            date: m.startTime,
-            dateLabel: formatDate(m.startTime).slice(5),
-            ppi: score / innCount
-          });
+          gData.push({ date: m.startTime, dateLabel: formatDate(m.startTime).slice(5), ppi: score / innCount });
         });
-
         gData.sort((a, b) => a.date - b.date);
-
-        setStats({
-          matches: userMatches.length,
-          winRate: Math.round((totalWins / userMatches.length) * 100),
-          accuracy: totalShots === 0 ? 0 : Math.round((totalPots / totalShots) * 100),
-          maxRun: overallMaxRun,
-          masuwari: masuwariCount,
-          graphData: gData
-        });
-
+        setStats({ matches: userMatches.length, winRate: Math.round((totalWins / userMatches.length) * 100), accuracy: totalShots === 0 ? 0 : Math.round((totalPots / totalShots) * 100), maxRun: overallMaxRun, masuwari: masuwariCount, graphData: gData });
       }, [loggedInUser, matchHistory]);
 
       const maxY = stats.graphData.length > 0 ? Math.ceil(Math.max(...stats.graphData.map(d => d.ppi), 2) * 2) / 2 : 2;
       const yTicks = [];
-      for (let i = maxY; i >= 0; i -= 0.5) {
-        yTicks.push(i);
-      }
+      for (let i = maxY; i >= 0; i -= 0.5) yTicks.push(i);
 
       const drawGraph = (maxYLimit) => {
         if (stats.graphData.length === 0) return null;
-        
         const gData = stats.graphData;
         let points = '';
         const xStep = gData.length > 1 ? 100 / (gData.length - 1) : 50;
@@ -932,11 +633,7 @@
                 const x = gData.length > 1 ? i * xStep : 50;
                 const y = 100 - (d.ppi / maxYLimit) * 100;
                 return (
-                  <div 
-                    key={i} 
-                    className="absolute bg-white rounded-full" 
-                    style={{ left: `${x}%`, top: `${y}%`, width: '6px', height: '6px', transform: 'translate(-50%, -50%)', border: '1.5px solid #0F4C3A' }} 
-                  />
+                  <div key={i} className="absolute bg-white rounded-full" style={{ left: `${x}%`, top: `${y}%`, width: '6px', height: '6px', transform: 'translate(-50%, -50%)', border: '1.5px solid #0F4C3A' }} />
                 );
               })}
             </div>
@@ -957,10 +654,8 @@
             <span className="text-xl mr-4 cursor-pointer" onClick={onBack}>&lt; 戻る</span>
             <h1 className="text-xl font-bold">個人データ</h1>
           </header>
-          
           <div className="flex-1 overflow-y-auto p-4">
             <h2 className="text-center text-lg font-bold mb-4 text-green-300">{loggedInUser} の成績</h2>
-            
             <PStatRow label="試合数" value={stats.matches} unit="試合" />
             <div className="flex gap-3 mb-3">
               <div className="flex-1 bg-[#1D5C45] p-4 rounded-xl border border-[#2A6552] text-center">
@@ -972,7 +667,6 @@
                 <p className="text-xl font-bold">{stats.accuracy}<span className="text-xs font-normal text-gray-400 ml-1">%</span></p>
               </div>
             </div>
-            
             <div className="flex gap-3 mb-4">
               <div className="flex-1 bg-[#1D5C45] p-4 rounded-xl border border-[#2A6552] text-center">
                 <p className="text-xs text-gray-300 mb-1">最大連続得点</p>
@@ -983,28 +677,20 @@
                 <p className="text-xl font-bold text-pink-400">{stats.masuwari}</p>
               </div>
             </div>
-
             <div className="bg-[#1D5C45] rounded-xl border border-[#2A6552] p-4 mb-8">
               <p className="text-sm text-gray-300 mb-4 font-medium">得点/イニング推移</p>
-              
               <div className="w-full h-[25vh] relative pl-8 pb-6 pr-2">
                 <div className="absolute top-4 bottom-6 left-8 right-2 border-l border-b border-[#2A6552]">
                   {yTicks.map(tick => {
                     const y = 100 - (tick / maxY) * 100;
                     return (
-                      <span key={tick} className="absolute -left-2 text-[10px] text-gray-400 leading-none text-right w-6" style={{ top: `${y}%`, transform: 'translate(-100%, -50%)' }}>
-                        {tick.toFixed(1)}
-                      </span>
+                      <span key={tick} className="absolute -left-2 text-[10px] text-gray-400 leading-none text-right w-6" style={{ top: `${y}%`, transform: 'translate(-100%, -50%)' }}>{tick.toFixed(1)}</span>
                     );
                   })}
-                  
                   <div className="absolute inset-0">
-                    {stats.graphData.length > 0 ? drawGraph(maxY) : (
-                      <div className="flex items-center justify-center w-full h-full text-gray-500 text-sm">データがありません</div>
-                    )}
+                    {stats.graphData.length > 0 ? drawGraph(maxY) : (<div className="flex items-center justify-center w-full h-full text-gray-500 text-sm">データがありません</div>)}
                   </div>
                 </div>
-
                 {stats.graphData.length > 0 && (
                   <div className="absolute bottom-0 left-8 right-2 flex justify-between text-[10px] text-gray-400">
                     <span style={{ transform: 'translateX(-50%)' }}>{stats.graphData[0].dateLabel}</span>
@@ -1013,7 +699,6 @@
                 )}
               </div>
             </div>
-
           </div>
         </div>
       );
@@ -1029,18 +714,8 @@
           <h1 className="text-xl font-bold">対戦相手を選択</h1>
         </header>
         <div className="flex-1 flex flex-col justify-center gap-6">
-          <button
-            onClick={onGuest}
-            className="w-full bg-[#1A6E4F] border border-white py-5 rounded-xl text-xl font-bold shadow-lg active:scale-95 transition-transform"
-          >
-            ゲストと対戦
-          </button>
-          <button
-            onClick={onRegistered}
-            className="w-full bg-[#2A6552] border border-white py-5 rounded-xl text-xl font-bold shadow-lg active:scale-95 transition-transform"
-          >
-            登録ユーザーと対戦
-          </button>
+          <button onClick={onGuest} className="w-full bg-[#1A6E4F] border border-white py-5 rounded-xl text-xl font-bold shadow-lg active:scale-95 transition-transform">ゲストと対戦</button>
+          <button onClick={onRegistered} className="w-full bg-[#2A6552] border border-white py-5 rounded-xl text-xl font-bold shadow-lg active:scale-95 transition-transform">登録ユーザーと対戦</button>
         </div>
       </div>
     );
@@ -1054,17 +729,9 @@
       const [isSubmitting, setIsSubmitting] = useState(false);
 
       const handleSubmit = async () => {
-        if (!name.trim() || !/^\d{4}$/.test(pin)) {
-          alert('対戦相手の名前と4桁の数字パスワードを入力してください。');
-          return;
-        }
+        if (!name.trim() || !/^\d{4}$/.test(pin)) { alert('対戦相手の名前と4桁の数字パスワードを入力してください。'); return; }
         setIsSubmitting(true);
-        try {
-          const ok = await onSubmit(name.trim(), pin);
-          if (!ok) return;
-        } finally {
-          setIsSubmitting(false);
-        }
+        try { await onSubmit(name.trim(), pin); } finally { setIsSubmitting(false); }
       };
 
       return (
@@ -1077,32 +744,13 @@
             <p className="text-sm text-gray-200 mb-5">対戦相手の名前とパスワードを入力してください。</p>
             <div className="mb-4">
               <label className="block text-sm mb-1 text-gray-200">対戦相手の名前</label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full bg-transparent border border-gray-400 rounded px-3 py-2 outline-none focus:border-green-400"
-                placeholder="名前を入力"
-              />
+              <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full bg-transparent border border-gray-400 rounded px-3 py-2 outline-none focus:border-green-400" placeholder="名前を入力" />
             </div>
             <div className="mb-5">
               <label className="block text-sm mb-1 text-gray-200">パスワード（数字4桁）</label>
-              <input
-                type="password"
-                maxLength="4"
-                value={pin}
-                onChange={(e) => setPin(e.target.value.replace(/[^\d]/g, '').slice(0, 4))}
-                className="w-full bg-transparent border border-gray-400 rounded px-3 py-2 outline-none focus:border-green-400"
-                placeholder="1234"
-              />
+              <input type="password" maxLength="4" value={pin} onChange={(e) => setPin(e.target.value.replace(/[^\d]/g, '').slice(0, 4))} className="w-full bg-transparent border border-gray-400 rounded px-3 py-2 outline-none focus:border-green-400" placeholder="1234" />
             </div>
-            <button
-              onClick={handleSubmit}
-              disabled={isSubmitting}
-              className={`w-full bg-[#1A6E4F] border border-white py-3 rounded-xl font-bold ${isSubmitting ? 'opacity-50' : 'active:scale-95'}`}
-            >
-              入力完了
-            </button>
+            <button onClick={handleSubmit} disabled={isSubmitting} className={`w-full bg-[#1A6E4F] border border-white py-3 rounded-xl font-bold ${isSubmitting ? 'opacity-50' : 'active:scale-95'}`}>入力完了</button>
           </div>
         </div>
       );
@@ -1112,46 +760,23 @@
     // セットアップ画面
     // ==========================================
     const SetupScreen = ({ onStart, onBack, playerDict, initialP1, initialP2 }) => {
-      const normalizedP1 = {
-        name: initialP1?.name || 'プレイヤー1',
-        sl: toSkill(initialP1?.sl, 6)
-      };
-      const normalizedP2 = {
-        name: initialP2?.name || 'プレイヤー2',
-        sl: toSkill(initialP2?.sl, 4)
-      };
+      const normalizedP1 = { name: initialP1?.name || 'プレイヤー1', sl: toSkill(initialP1?.sl, 6) };
+      const normalizedP2 = { name: initialP2?.name || 'プレイヤー2', sl: toSkill(initialP2?.sl, 4) };
       const [p1, setP1] = useState({ ...normalizedP1, goal: SL_GOALS[normalizedP1.sl] });
       const [p2, setP2] = useState({ ...normalizedP2, goal: SL_GOALS[normalizedP2.sl] });
       const safePlayerDict = playerDict || {};
-      
       const [showDropdown1, setShowDropdown1] = useState(false);
       const [showDropdown2, setShowDropdown2] = useState(false);
 
-      useEffect(() => {
-        setP1({ ...normalizedP1, goal: SL_GOALS[normalizedP1.sl] });
-      }, [normalizedP1.name, normalizedP1.sl]);
-
-      useEffect(() => {
-        setP2({ ...normalizedP2, goal: SL_GOALS[normalizedP2.sl] });
-      }, [normalizedP2.name, normalizedP2.sl]);
+      useEffect(() => { setP1({ ...normalizedP1, goal: SL_GOALS[normalizedP1.sl] }); }, [normalizedP1.name, normalizedP1.sl]);
+      useEffect(() => { setP2({ ...normalizedP2, goal: SL_GOALS[normalizedP2.sl] }); }, [normalizedP2.name, normalizedP2.sl]);
 
       const handleSelectPlayer = (playerNum, name) => {
-        if (playerNum === 1) {
-          const sl = toSkill(safePlayerDict[name], p1.sl);
-          setP1({ name, sl, goal: SL_GOALS[sl] });
-          setShowDropdown1(false);
-        } else {
-          const sl = toSkill(safePlayerDict[name], p2.sl);
-          setP2({ name, sl, goal: SL_GOALS[sl] });
-          setShowDropdown2(false);
-        }
+        if (playerNum === 1) { const sl = toSkill(safePlayerDict[name], p1.sl); setP1({ name, sl, goal: SL_GOALS[sl] }); setShowDropdown1(false); }
+        else { const sl = toSkill(safePlayerDict[name], p2.sl); setP2({ name, sl, goal: SL_GOALS[sl] }); setShowDropdown2(false); }
       };
 
-      const SearchIcon = () => (
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-        </svg>
-      );
+      const SearchIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>);
 
       return (
         <div className="flex flex-col h-[100dvh] max-w-md mx-auto bg-[#0F4C3A] p-6 relative">
@@ -1159,42 +784,20 @@
             <span className="text-xl mr-4 cursor-pointer" onClick={onBack}>&lt; 戻る</span>
             <h1 className="text-xl font-bold">Player info</h1>
           </header>
-
           <div className="mb-8">
             <h2 className="text-2xl font-bold mb-4">Player1</h2>
-            
             <div className="flex items-center mb-4 relative">
               <label className="w-24 text-lg">Name:</label>
               <div className="flex-1 flex items-center bg-transparent border border-gray-400 rounded focus-within:border-green-400">
-                <input 
-                  type="text" 
-                  value={p1.name} 
-                  onChange={e => setP1({...p1, name: e.target.value})} 
-                  className="flex-1 bg-transparent px-2 py-1 outline-none text-white w-full" 
-                />
-                <button 
-                  onClick={() => setShowDropdown1(!showDropdown1)}
-                  className="p-1 pr-2 active:scale-95"
-                >
-                  <SearchIcon />
-                </button>
+                <input type="text" value={p1.name} onChange={e => setP1({...p1, name: e.target.value})} className="flex-1 bg-transparent px-2 py-1 outline-none text-white w-full" />
+                <button onClick={() => setShowDropdown1(!showDropdown1)} className="p-1 pr-2 active:scale-95"><SearchIcon /></button>
               </div>
-              
               {showDropdown1 && Object.keys(safePlayerDict).length > 0 && (
                 <ul className="absolute top-full left-24 right-0 mt-1 bg-[#1D5C45] border border-[#2A6552] rounded shadow-xl z-50 max-h-40 overflow-y-auto">
-                  {Object.keys(safePlayerDict).map((name, i) => (
-                    <li 
-                      key={i} 
-                      onClick={() => handleSelectPlayer(1, name)}
-                      className="px-3 py-2 border-b border-[#2A6552] last:border-b-0 active:bg-[#2A6552] cursor-pointer text-sm"
-                    >
-                      {name} <span className="text-gray-400 ml-2">SL:{safePlayerDict[name]}</span>
-                    </li>
-                  ))}
+                  {Object.keys(safePlayerDict).map((name, i) => (<li key={i} onClick={() => handleSelectPlayer(1, name)} className="px-3 py-2 border-b border-[#2A6552] last:border-b-0 active:bg-[#2A6552] cursor-pointer text-sm">{name} <span className="text-gray-400 ml-2">SL:{safePlayerDict[name]}</span></li>))}
                 </ul>
               )}
             </div>
-
             <div className="flex items-center mb-4">
               <label className="w-24 text-lg">Skill level:</label>
               <input type="range" min="1" max="9" value={p1.sl} onChange={e => { const sl = parseInt(e.target.value); setP1({...p1, sl, goal: SL_GOALS[sl]}); }} className="flex-1" />
@@ -1202,51 +805,23 @@
             </div>
             <div className="flex items-center">
               <label className="w-24 text-lg">Race to:</label>
-              <input
-                type="number"
-                min="1"
-                value={p1.goal}
-                onChange={e => { const val = Math.max(1, parseInt(e.target.value) || 1); setP1({...p1, goal: val}); }}
-                className="flex-1 bg-[#1D5C45] border border-gray-500 rounded px-2 py-1 text-gray-200 outline-none focus:border-green-400"
-              />
+              <input type="number" min="1" value={p1.goal} onChange={e => { const val = Math.max(1, parseInt(e.target.value) || 1); setP1({...p1, goal: val}); }} className="flex-1 bg-[#1D5C45] border border-gray-500 rounded px-2 py-1 text-gray-200 outline-none focus:border-green-400" />
             </div>
           </div>
-
           <div className="mb-12">
             <h2 className="text-2xl font-bold mb-4">Player2</h2>
-            
             <div className="flex items-center mb-4 relative">
               <label className="w-24 text-lg">Name:</label>
               <div className="flex-1 flex items-center bg-transparent border border-gray-400 rounded focus-within:border-pink-400">
-                <input 
-                  type="text" 
-                  value={p2.name} 
-                  onChange={e => setP2({...p2, name: e.target.value})} 
-                  className="flex-1 bg-transparent px-2 py-1 outline-none text-white w-full" 
-                />
-                <button 
-                  onClick={() => setShowDropdown2(!showDropdown2)}
-                  className="p-1 pr-2 active:scale-95"
-                >
-                  <SearchIcon />
-                </button>
+                <input type="text" value={p2.name} onChange={e => setP2({...p2, name: e.target.value})} className="flex-1 bg-transparent px-2 py-1 outline-none text-white w-full" />
+                <button onClick={() => setShowDropdown2(!showDropdown2)} className="p-1 pr-2 active:scale-95"><SearchIcon /></button>
               </div>
-              
               {showDropdown2 && Object.keys(safePlayerDict).length > 0 && (
                 <ul className="absolute top-full left-24 right-0 mt-1 bg-[#1D5C45] border border-[#2A6552] rounded shadow-xl z-50 max-h-40 overflow-y-auto">
-                  {Object.keys(safePlayerDict).map((name, i) => (
-                    <li 
-                      key={i} 
-                      onClick={() => handleSelectPlayer(2, name)}
-                      className="px-3 py-2 border-b border-[#2A6552] last:border-b-0 active:bg-[#2A6552] cursor-pointer text-sm"
-                    >
-                      {name} <span className="text-gray-400 ml-2">SL:{safePlayerDict[name]}</span>
-                    </li>
-                  ))}
+                  {Object.keys(safePlayerDict).map((name, i) => (<li key={i} onClick={() => handleSelectPlayer(2, name)} className="px-3 py-2 border-b border-[#2A6552] last:border-b-0 active:bg-[#2A6552] cursor-pointer text-sm">{name} <span className="text-gray-400 ml-2">SL:{safePlayerDict[name]}</span></li>))}
                 </ul>
               )}
             </div>
-
             <div className="flex items-center mb-4">
               <label className="w-24 text-lg">Skill level:</label>
               <input type="range" min="1" max="9" value={p2.sl} onChange={e => { const sl = parseInt(e.target.value); setP2({...p2, sl, goal: SL_GOALS[sl]}); }} className="flex-1" />
@@ -1254,22 +829,10 @@
             </div>
             <div className="flex items-center">
               <label className="w-24 text-lg">Race to:</label>
-              <input
-                type="number"
-                min="1"
-                value={p2.goal}
-                onChange={e => { const val = Math.max(1, parseInt(e.target.value) || 1); setP2({...p2, goal: val}); }}
-                className="flex-1 bg-[#1D5C45] border border-gray-500 rounded px-2 py-1 text-gray-200 outline-none focus:border-pink-400"
-              />
+              <input type="number" min="1" value={p2.goal} onChange={e => { const val = Math.max(1, parseInt(e.target.value) || 1); setP2({...p2, goal: val}); }} className="flex-1 bg-[#1D5C45] border border-gray-500 rounded px-2 py-1 text-gray-200 outline-none focus:border-pink-400" />
             </div>
           </div>
-
-          <button 
-            onClick={() => onStart(p1, p2)}
-            className="mt-auto mb-10 w-full bg-[#1A6E4F] border border-white py-4 rounded-xl text-xl font-bold flex items-center justify-center gap-4 active:scale-95 transition-transform shadow-lg"
-          >
-            Start game!
-          </button>
+          <button onClick={() => onStart(p1, p2)} className="mt-auto mb-10 w-full bg-[#1A6E4F] border border-white py-4 rounded-xl text-xl font-bold flex items-center justify-center gap-4 active:scale-95 transition-transform shadow-lg">Start game!</button>
         </div>
       );
     };
@@ -1281,222 +844,109 @@
       const getInitialState = () => ({
         p1: { name: p1Setup.name, sl: p1Setup.sl, goal: p1Setup.goal !== undefined ? p1Setup.goal : SL_GOALS[p1Setup.sl], score: 0 },
         p2: { name: p2Setup.name, sl: p2Setup.sl, goal: p2Setup.goal !== undefined ? p2Setup.goal : SL_GOALS[p2Setup.sl], score: 0 },
-        activePlayer: null,
-        rackWinner: null,
-        isBreakSelection: true,
-        rack: 1,
-        inning: 1,
-        deadCount: 0,
-        tableBalls: [1, 2, 3, 4, 5, 6, 7, 8, 9],
-        timeline: [{ inning: 1, p1: [], p2: [] }],
-        isNextRackPrompt: false,
-        isGameOver: false,
-        winner: null,
-        lastAction: null,
-        startTime: Date.now(),
-        endTime: null
+        activePlayer: null, rackWinner: null, isBreakSelection: true, rack: 1, inning: 1, deadCount: 0,
+        tableBalls: [1, 2, 3, 4, 5, 6, 7, 8, 9], timeline: [{ inning: 1, p1: [], p2: [] }],
+        isNextRackPrompt: false, isGameOver: false, winner: null, lastAction: null, startTime: Date.now(), endTime: null
       });
 
       const [history, setHistory] = useState(() => [initialMatchState || getInitialState()]);
       const currentState = history[history.length - 1];
       const timelineRef = useRef(null);
-      
       const [showExitWarning, setShowExitWarning] = useState(false);
       const [isSaving, setIsSaving] = useState(false);
 
-      useEffect(() => {
-        if (timelineRef.current) {
-          timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
-        }
-      }, [currentState.timeline]);
+      useEffect(() => { if (timelineRef.current) timelineRef.current.scrollTop = timelineRef.current.scrollHeight; }, [currentState.timeline]);
+      useEffect(() => { if (onMatchStateChange) onMatchStateChange(currentState); }, [currentState, onMatchStateChange]);
 
-      useEffect(() => {
-        if (!onMatchStateChange) return;
-        onMatchStateChange(currentState);
-      }, [currentState, onMatchStateChange]);
-
-      const pushState = (newState) => {
-        setHistory(prev => [...prev, newState]);
-      };
-
+      const pushState = (newState) => setHistory(prev => [...prev, newState]);
       const cloneState = () => JSON.parse(JSON.stringify(currentState));
 
       const handleSelectBreaker = (playerNum) => {
         if (!currentState.isBreakSelection) return;
-        const next = cloneState();
-        next.activePlayer = playerNum;
-        next.isBreakSelection = false;
-        
-        const pKey = playerNum === 1 ? 'p1' : 'p2';
-        next.timeline[0][pKey].push({ type: 'break' });
-
-        next.lastAction = { type: 'set_breaker' };
-        pushState(next);
+        const next = cloneState(); next.activePlayer = playerNum; next.isBreakSelection = false;
+        const pKey = playerNum === 1 ? 'p1' : 'p2'; next.timeline[0][pKey].push({ type: 'break' });
+        next.lastAction = { type: 'set_breaker' }; pushState(next);
       };
 
       const handleBallTap = (num) => {
         if (currentState.isNextRackPrompt || currentState.isBreakSelection || currentState.isGameOver || !currentState.tableBalls.includes(num)) return;
-
-        const next = cloneState();
-        const pts = num === 9 ? 2 : 1;
-        const pKey = next.activePlayer === 1 ? 'p1' : 'p2';
-
-        next[pKey].score += pts;
-        next.tableBalls = next.tableBalls.filter(b => b !== num);
-
+        const next = cloneState(); const pts = num === 9 ? 2 : 1; const pKey = next.activePlayer === 1 ? 'p1' : 'p2';
+        next[pKey].score += pts; next.tableBalls = next.tableBalls.filter(b => b !== num);
         const currentInning = next.timeline.find(t => t.inning === next.inning);
         currentInning[pKey].push({ type: 'pot', ball: num });
-
         next.lastAction = { type: 'pot', ball: num, player: next.activePlayer, points: pts };
-
-        if (num === 9) {
-          next.isNextRackPrompt = true;
-          next.rackWinner = next.activePlayer;
-        }
-
+        if (num === 9) { next.isNextRackPrompt = true; next.rackWinner = next.activePlayer; }
         pushState(next);
       };
 
       const handleDeadAction = () => {
         const la = currentState.lastAction;
         if (!la || la.type !== 'pot' || currentState.isGameOver) return;
-
-        const next = cloneState();
-        const pKey = la.player === 1 ? 'p1' : 'p2';
-
-        next[pKey].score -= la.points;
-        next.deadCount += 1;
-
+        const next = cloneState(); const pKey = la.player === 1 ? 'p1' : 'p2';
+        next[pKey].score -= la.points; next.deadCount += 1;
         const currentInning = next.timeline.find(t => t.inning === next.inning);
         const lastEvent = currentInning[pKey][currentInning[pKey].length - 1];
-        if (lastEvent && lastEvent.type === 'pot' && lastEvent.ball === la.ball) {
-          lastEvent.type = 'dead';
-        }
-
-        next.lastAction = { type: 'dead', ball: la.ball, player: la.player };
-        next.isGameOver = false; 
-
-        pushState(next);
+        if (lastEvent && lastEvent.type === 'pot' && lastEvent.ball === la.ball) lastEvent.type = 'dead';
+        next.lastAction = { type: 'dead', ball: la.ball, player: la.player }; next.isGameOver = false; pushState(next);
       };
 
       const handleSwitchAction = () => {
         if (currentState.isNextRackPrompt || currentState.isBreakSelection || currentState.isGameOver) return;
-        const next = cloneState();
-        const pKey = next.activePlayer === 1 ? 'p1' : 'p2';
-
+        const next = cloneState(); const pKey = next.activePlayer === 1 ? 'p1' : 'p2';
         const currentInning = next.timeline.find(t => t.inning === next.inning);
         currentInning[pKey].push({ type: 'switch' });
-
-        if (next.activePlayer === 1) {
-          next.activePlayer = 2;
-        } else {
-          next.activePlayer = 1;
-          next.inning += 1;
-          next.timeline.push({ inning: next.inning, p1: [], p2: [] });
-        }
-
-        next.lastAction = { type: 'switch' };
-        pushState(next);
+        if (next.activePlayer === 1) next.activePlayer = 2; else { next.activePlayer = 1; next.inning += 1; next.timeline.push({ inning: next.inning, p1: [], p2: [] }); }
+        next.lastAction = { type: 'switch' }; pushState(next);
       };
 
       const handleFinishAction = () => {
-        const next = cloneState();
-        next.isGameOver = true;
-        next.endTime = Date.now();
-        next.winner = next.p1.score >= next.p1.goal ? 1 : 2;
-        pushState(next);
+        const next = cloneState(); next.isGameOver = true; next.endTime = Date.now(); next.winner = next.p1.score >= next.p1.goal ? 1 : 2; pushState(next);
       };
 
       const handleSafetyAction = () => {
         if (currentState.isNextRackPrompt || currentState.isBreakSelection || currentState.isGameOver) return;
-        const next = cloneState();
-        const pKey = next.activePlayer === 1 ? 'p1' : 'p2';
-
+        const next = cloneState(); const pKey = next.activePlayer === 1 ? 'p1' : 'p2';
         const currentInning = next.timeline.find(t => t.inning === next.inning);
         currentInning[pKey].push({ type: 'safety' });
-
-        if (next.activePlayer === 1) {
-          next.activePlayer = 2;
-        } else {
-          next.activePlayer = 1;
-          next.inning += 1;
-          next.timeline.push({ inning: next.inning, p1: [], p2: [] });
-        }
-
-        next.lastAction = { type: 'safety' };
-        pushState(next);
+        if (next.activePlayer === 1) next.activePlayer = 2; else { next.activePlayer = 1; next.inning += 1; next.timeline.push({ inning: next.inning, p1: [], p2: [] }); }
+        next.lastAction = { type: 'safety' }; pushState(next);
       };
 
       const handleNextRack = () => {
-        const next = cloneState();
-        next.isNextRackPrompt = false;
-        next.rack += 1;
-        next.tableBalls = [1, 2, 3, 4, 5, 6, 7, 8, 9];
-        
-        next.activePlayer = next.rackWinner;
-        const pKey = next.activePlayer === 1 ? 'p1' : 'p2';
+        const next = cloneState(); next.isNextRackPrompt = false; next.rack += 1; next.tableBalls = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+        next.activePlayer = next.rackWinner; const pKey = next.activePlayer === 1 ? 'p1' : 'p2';
         const currentInning = next.timeline.find(t => t.inning === next.inning);
         currentInning[pKey].push({ type: 'break' });
-
-        next.lastAction = { type: 'next_rack' };
-        pushState(next);
+        next.lastAction = { type: 'next_rack' }; pushState(next);
       };
 
-      const handleUndo = () => {
-        if (history.length > 1) {
-          setHistory(prev => prev.slice(0, -1));
-        }
-      };
+      const handleUndo = () => { if (history.length > 1) setHistory(prev => prev.slice(0, -1)); };
 
       const { p1, p2, activePlayer, rack, inning, deadCount, tableBalls, timeline, isNextRackPrompt, isBreakSelection, isGameOver, winner, lastAction, startTime, endTime } = currentState;
       const canUndo = history.length > 1 && !isGameOver;
       const canDead = lastAction && lastAction.type === 'pot' && !isGameOver;
-      
       const isGoalReached = p1.score >= p1.goal || p2.score >= p2.goal;
 
       const p1Stats = computeStats(timeline, 'p1');
       const p2Stats = computeStats(timeline, 'p2');
-      
       let p1TeamPts = 0, p2TeamPts = 0;
       if (isGameOver) {
         const loserPlayer = winner === 1 ? p2 : p1;
         const pts = getTeamPoints(loserPlayer.sl, loserPlayer.score);
-        p1TeamPts = winner === 1 ? pts.winner : pts.loser;
-        p2TeamPts = winner === 2 ? pts.winner : pts.loser;
+        p1TeamPts = winner === 1 ? pts.winner : pts.loser; p2TeamPts = winner === 2 ? pts.winner : pts.loser;
       }
 
       const handleSave = async () => {
         if (isSaving) return;
         setIsSaving(true);
-        const matchData = {
-          startTime,
-          endTime,
-          p1: { name: p1.name, sl: p1.sl, score: p1.score, goal: p1.goal },
-          p2: { name: p2.name, sl: p2.sl, score: p2.score, goal: p2.goal },
-          winner,
-          p1TeamPts,
-          p2TeamPts,
-          inning,
-          timeline,
-          p1Stats,
-          p2Stats
-        };
+        const matchData = { startTime, endTime, p1: { name: p1.name, sl: p1.sl, score: p1.score, goal: p1.goal }, p2: { name: p2.name, sl: p2.sl, score: p2.score, goal: p2.goal }, winner, p1TeamPts, p2TeamPts, inning, timeline, p1Stats, p2Stats };
         const saved = await onSaveMatch(matchData, p1, p2);
         setIsSaving(false);
-        if (saved) {
-          alert('試合結果を保存しました。');
-          onBack();
-        } else {
-          alert('保存に失敗しました。');
-        }
+        if (saved) { alert('試合結果を保存しました。'); onBack(); } else { alert('保存に失敗しました。'); }
       };
 
       const StatRow = ({ label, v1, v2 }) => (
-        <div className="flex justify-between items-center text-sm py-[6px]">
-          <span className="w-12 text-center font-bold text-gray-800">{v1}</span>
-          <span className="flex-1 text-center text-gray-500 font-medium">{label}</span>
-          <span className="w-12 text-center font-bold text-gray-800">{v2}</span>
-        </div>
+        <div className="flex justify-between items-center text-sm py-[6px]"><span className="w-12 text-center font-bold text-gray-800">{v1}</span><span className="flex-1 text-center text-gray-500 font-medium">{label}</span><span className="w-12 text-center font-bold text-gray-800">{v2}</span></div>
       );
 
       const renderTimelineActions = (actions) => (actions || []).map((action, idx) => (
@@ -1510,7 +960,6 @@
 
       return (
         <div className="flex flex-col h-[100dvh] max-w-md mx-auto bg-[#0F4C3A] shadow-xl relative overflow-hidden">
-          
           {showExitWarning && (
             <div className="absolute inset-0 z-50 bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
               <div className="bg-white text-gray-800 rounded-2xl w-full p-6 shadow-2xl relative text-center">
@@ -1523,58 +972,36 @@
               </div>
             </div>
           )}
-
-          {isBreakSelection && (
-            <div className="absolute inset-0 z-40 bg-black/40 flex flex-col items-center justify-end pb-32">
-              <p className="text-2xl font-bold text-white mb-8 animate-bounce">↑ 先攻プレイヤーを選択</p>
-            </div>
-          )}
-
+          {isBreakSelection && (<div className="absolute inset-0 z-40 bg-black/40 flex flex-col items-center justify-end pb-32"><p className="text-2xl font-bold text-white mb-8 animate-bounce">↑ 先攻プレイヤーを選択</p></div>)}
           {isNextRackPrompt && !isGoalReached && !isGameOver && (
             <div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none">
-              <button onClick={handleNextRack} className="pointer-events-auto bg-green-700/90 backdrop-blur text-white px-8 py-5 rounded-2xl text-2xl font-bold shadow-[0_0_20px_rgba(0,0,0,0.5)] border-2 border-white animate-pulse">
-                次のラックへ
-              </button>
+              <button onClick={handleNextRack} className="pointer-events-auto bg-green-700/90 backdrop-blur text-white px-8 py-5 rounded-2xl text-2xl font-bold shadow-[0_0_20px_rgba(0,0,0,0.5)] border-2 border-white animate-pulse">次のラックへ</button>
             </div>
           )}
-
           {isGameOver && (
             <div className="absolute inset-0 z-50 bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
               <div className="bg-white text-gray-800 rounded-3xl w-full p-6 shadow-2xl relative">
-                <div className="flex justify-between text-xs text-gray-400 mb-2 px-2">
-                  <span>{formatDate(endTime || startTime)}</span>
-                  <span>{formatTime(startTime)}-{endTime ? formatTime(endTime) : ''}</span>
-                </div>
-                
+                <div className="flex justify-between text-xs text-gray-400 mb-2 px-2"><span>{formatDate(endTime || startTime)}</span><span>{formatTime(startTime)}-{endTime ? formatTime(endTime) : ''}</span></div>
                 <div className="flex justify-between items-center mb-2">
                   <div className="text-center flex-1">
                     <p className={`text-xl font-bold ${winner === 1 ? 'text-pink-500' : 'text-gray-500'}`}>{winner === 1 ? 'Win!' : 'Lose..'}</p>
                     <p className="text-sm text-gray-600 mt-1">{p1.name} (SL:{p1.sl})</p>
-                    <p className="mt-1">
-                      <span className="text-5xl font-normal text-gray-800">{p1.score}</span>
-                      <span className="text-lg text-gray-500 font-medium">/{p1.goal}</span>
-                    </p>
+                    <p className="mt-1"><span className="text-5xl font-normal text-gray-800">{p1.score}</span><span className="text-lg text-gray-500 font-medium">/{p1.goal}</span></p>
                   </div>
                   <div className="text-center flex-1">
                     <p className={`text-xl font-bold ${winner === 2 ? 'text-pink-500' : 'text-gray-500'}`}>{winner === 2 ? 'Win!' : 'Lose..'}</p>
                     <p className="text-sm text-gray-600 mt-1">{p2.name} (SL:{p2.sl})</p>
-                    <p className="mt-1">
-                      <span className="text-5xl font-normal text-gray-800">{p2.score}</span>
-                      <span className="text-lg text-gray-500 font-medium">/{p2.goal}</span>
-                    </p>
+                    <p className="mt-1"><span className="text-5xl font-normal text-gray-800">{p2.score}</span><span className="text-lg text-gray-500 font-medium">/{p2.goal}</span></p>
                   </div>
                 </div>
-                
                 <p className="text-center text-lg font-medium text-gray-800">チーム得点: {p1TeamPts}-{p2TeamPts}</p>
                 <p className="text-center text-sm font-medium text-gray-500 mb-4">イニング : {inning}</p>
-                
                 <div className="border-t border-gray-200 py-3 space-y-1">
                   <StatRow label="セーフティー" v1={p1Stats.safeties} v2={p2Stats.safeties} />
                   <StatRow label="シュート精度" v1={`${p1Stats.accuracy}%`} v2={`${p2Stats.accuracy}%`} />
                   <StatRow label="ブレイク回数" v1={p1Stats.breaks} v2={p2Stats.breaks} />
                   <StatRow label="最大連続得点" v1={p1Stats.maxRun} v2={p2Stats.maxRun} />
                 </div>
-                
                 <div className="flex justify-around mt-4 pt-2">
                   <button onClick={handleSave} disabled={isSaving} className={`text-blue-500 font-medium text-lg px-8 py-2 transition-opacity ${isSaving ? 'opacity-40 cursor-not-allowed' : ''}`}>{isSaving ? '保存中...' : '保存'}</button>
                   <button onClick={handleUndo} disabled={isSaving} className={`text-pink-500 font-medium text-lg px-8 py-2 ${isSaving ? 'opacity-40 cursor-not-allowed' : ''}`}>cancel</button>
@@ -1582,63 +1009,40 @@
               </div>
             </div>
           )}
-
           <header className="flex justify-between items-center p-3 border-b border-[#2A6552]">
             <button className="text-xl px-2" onClick={() => setShowExitWarning(true)}>&lt;</button>
             <h1 className="text-md font-semibold">JPA match!</h1>
             <span className="text-xs text-gray-300">開始時刻 : {formatTime(startTime)}</span>
           </header>
-
           <div className="flex h-28 border-b border-[#2A6552]">
-            <div 
-              onClick={() => handleSelectBreaker(1)}
-              className={`flex-1 flex flex-col justify-center items-center relative transition-colors ${activePlayer === 1 ? 'bg-[#1D634C]' : ''} ${isBreakSelection ? 'cursor-pointer hover:bg-[#1A5A44] z-50' : ''}`}
-            >
+            <div onClick={() => handleSelectBreaker(1)} className={`flex-1 flex flex-col justify-center items-center relative transition-colors ${activePlayer === 1 ? 'bg-[#1D634C]' : ''} ${isBreakSelection ? 'cursor-pointer hover:bg-[#1A5A44] z-50' : ''}`}>
               <div className="absolute top-2 left-2 text-sm">{p1.name}</div>
               <div className="absolute top-7 left-2 text-sm text-gray-300">SL: {p1.sl} <span className="ml-2">Goal: {p1.goal}</span></div>
               <span className="text-5xl mt-6">{p1.score}</span>
               {p1.goal - p1.score <= 5 && p1.goal - p1.score > 0 && <span className="text-yellow-400 text-xs mt-1 absolute bottom-1">{p1.goal - p1.score} more!</span>}
             </div>
-
-            <div 
-              onClick={() => handleSelectBreaker(2)}
-              className={`flex-1 flex flex-col justify-center items-center relative transition-colors ${activePlayer === 2 ? 'bg-[#1D634C]' : ''} ${isBreakSelection ? 'cursor-pointer hover:bg-[#1A5A44] z-50' : ''}`}
-            >
+            <div onClick={() => handleSelectBreaker(2)} className={`flex-1 flex flex-col justify-center items-center relative transition-colors ${activePlayer === 2 ? 'bg-[#1D634C]' : ''} ${isBreakSelection ? 'cursor-pointer hover:bg-[#1A5A44] z-50' : ''}`}>
                <div className="absolute top-2 left-2 text-sm">{p2.name}</div>
               <div className="absolute top-7 left-2 text-sm text-gray-300">SL: {p2.sl} <span className="ml-2">Goal: {p2.goal}</span></div>
               <span className="text-5xl mt-6">{p2.score}</span>
               {p2.goal - p2.score <= 5 && p2.goal - p2.score > 0 && <span className="text-yellow-400 text-xs mt-1 absolute bottom-1">{p2.goal - p2.score} more!</span>}
             </div>
           </div>
-
           <div className="flex justify-between px-6 py-1 border-b border-[#2A6552] text-sm">
-            <span>Rack: {rack}</span>
-            <span>Inning: {inning}</span>
-            <span>Dead: {deadCount}</span>
+            <span>Rack: {rack}</span><span>Inning: {inning}</span><span>Dead: {deadCount}</span>
           </div>
-
           <div className="flex-1 overflow-y-auto p-2" ref={timelineRef}>
             <div className="space-y-0 text-sm pb-4">
               {(timeline || []).map((inn, idx) => (
                 <div key={idx} className="flex relative items-center py-2 border-b border-[#1D5C45] min-h-[40px]">
                   <div className="absolute w-full h-[1px] bg-[#1D5C45] top-1/2 transform -translate-y-1/2 z-0"></div>
-                  
-                  <div className="flex-1 flex flex-wrap gap-1 pr-4 justify-end z-10 items-center">
-                    {renderTimelineActions(inn.p1)}
-                  </div>
-
-                  <div className="w-6 flex justify-center z-10 bg-[#0F4C3A]">
-                    <span className="text-xs">{inn.inning}</span>
-                  </div>
-
-                  <div className="flex-1 flex flex-wrap gap-1 pl-4 justify-start z-10 items-center">
-                    {renderTimelineActions(inn.p2)}
-                  </div>
+                  <div className="flex-1 flex flex-wrap gap-1 pr-4 justify-end z-10 items-center">{renderTimelineActions(inn.p1)}</div>
+                  <div className="w-6 flex justify-center z-10 bg-[#0F4C3A]"><span className="text-xs">{inn.inning}</span></div>
+                  <div className="flex-1 flex flex-wrap gap-1 pl-4 justify-start z-10 items-center">{renderTimelineActions(inn.p2)}</div>
                 </div>
               ))}
             </div>
           </div>
-
           <div className="bg-[#0B3A2C] pt-4 pb-8 rounded-t-2xl shadow-[0_-4px_10px_rgba(0,0,0,0.3)] z-30">
             <div className="flex flex-col items-center gap-2 mb-6 px-4">
               {[[1,2,3,4],[5,6,7,8,9]].map((row, rowIdx) => (
@@ -1646,47 +1050,17 @@
                   {row.map((num) => {
                     const isAvailable = tableBalls.includes(num);
                     return (
-                      <button
-                        key={num}
-                        onClick={() => handleBallTap(num)}
-                        disabled={!isAvailable || isNextRackPrompt || isBreakSelection || isGameOver}
-                        className={`w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold transition-all shadow-md
-                          ${isAvailable ? getBallColor(num) : 'bg-gray-800 opacity-20 shadow-none'}
-                          ${(isNextRackPrompt || isBreakSelection || isGameOver) ? 'cursor-not-allowed' : 'active:scale-95'}
-                        `}
-                      >
-                        {num}
-                      </button>
+                      <button key={num} onClick={() => handleBallTap(num)} disabled={!isAvailable || isNextRackPrompt || isBreakSelection || isGameOver} className={`w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold transition-all shadow-md ${isAvailable ? getBallColor(num) : 'bg-gray-800 opacity-20 shadow-none'} ${(isNextRackPrompt || isBreakSelection || isGameOver) ? 'cursor-not-allowed' : 'active:scale-95'}`}>{num}</button>
                     );
                   })}
                 </div>
               ))}
             </div>
             <div className="flex justify-around px-2 text-xs font-medium">
-              <button onClick={handleDeadAction} disabled={!canDead} className={`flex flex-col items-center gap-1 transition-opacity ${canDead ? 'text-white opacity-100' : 'text-gray-500 opacity-50'}`}>
-                <div className={`w-10 h-10 border-2 rounded-full flex items-center justify-center ${canDead ? 'border-white' : 'border-gray-500'}`}><span className="text-lg">×</span></div><span>dead</span>
-              </button>
-              
-              <button onClick={handleSafetyAction} disabled={isBreakSelection || isGameOver} className={`flex flex-col items-center gap-1 ${(isBreakSelection || isGameOver) ? 'opacity-50' : 'active:opacity-70'}`}>
-                <div className="w-10 h-10 border-2 border-white rounded-full flex items-center justify-center"><span className="text-lg">S</span></div><span>safety</span>
-              </button>
-              
-              {isGoalReached ? (
-                <button onClick={handleFinishAction} className="flex flex-col items-center gap-1 active:opacity-70 text-pink-500">
-                  <div className="w-10 h-10 border-2 border-pink-500 rounded-full flex items-center justify-center">
-                    <span className="text-[12px] font-bold">Fin</span>
-                  </div>
-                  <span>finish</span>
-                </button>
-              ) : (
-                <button onClick={handleSwitchAction} disabled={isBreakSelection || isGameOver} className={`flex flex-col items-center gap-1 ${(isBreakSelection || isGameOver) ? 'opacity-50' : 'active:opacity-70 text-yellow-300'}`}>
-                  <div className={`w-10 h-10 border-2 rounded-full flex items-center justify-center ${(isBreakSelection || isGameOver) ? 'border-gray-500' : 'border-yellow-300'}`}><span className="text-lg">⇄</span></div><span>switch</span>
-                </button>
-              )}
-
-              <button onClick={handleUndo} disabled={!canUndo} className={`flex flex-col items-center gap-1 ${canUndo ? 'text-white opacity-100 active:opacity-70' : 'text-gray-500 opacity-50'}`}>
-                <div className={`w-10 h-10 border-2 rounded-full flex items-center justify-center ${canUndo ? 'border-white' : 'border-gray-500'}`}><span className="text-lg">↶</span></div><span>undo</span>
-              </button>
+              <button onClick={handleDeadAction} disabled={!canDead} className={`flex flex-col items-center gap-1 transition-opacity ${canDead ? 'text-white opacity-100' : 'text-gray-500 opacity-50'}`}><div className={`w-10 h-10 border-2 rounded-full flex items-center justify-center ${canDead ? 'border-white' : 'border-gray-500'}`}><span className="text-lg">×</span></div><span>dead</span></button>
+              <button onClick={handleSafetyAction} disabled={isBreakSelection || isGameOver} className={`flex flex-col items-center gap-1 ${(isBreakSelection || isGameOver) ? 'opacity-50' : 'active:opacity-70'}`}><div className="w-10 h-10 border-2 border-white rounded-full flex items-center justify-center"><span className="text-lg">S</span></div><span>safety</span></button>
+              {isGoalReached ? (<button onClick={handleFinishAction} className="flex flex-col items-center gap-1 active:opacity-70 text-pink-500"><div className="w-10 h-10 border-2 border-pink-500 rounded-full flex items-center justify-center"><span className="text-[12px] font-bold">Fin</span></div><span>finish</span></button>) : (<button onClick={handleSwitchAction} disabled={isBreakSelection || isGameOver} className={`flex flex-col items-center gap-1 ${(isBreakSelection || isGameOver) ? 'opacity-50' : 'active:opacity-70 text-yellow-300'}`}><div className={`w-10 h-10 border-2 rounded-full flex items-center justify-center ${(isBreakSelection || isGameOver) ? 'border-gray-500' : 'border-yellow-300'}`}><span className="text-lg">⇄</span></div><span>switch</span></button>)}
+              <button onClick={handleUndo} disabled={!canUndo} className={`flex flex-col items-center gap-1 ${canUndo ? 'text-white opacity-100 active:opacity-70' : 'text-gray-500 opacity-50'}`}><div className={`w-10 h-10 border-2 rounded-full flex items-center justify-center ${canUndo ? 'border-white' : 'border-gray-500'}`}><span className="text-lg">↶</span></div><span>undo</span></button>
             </div>
           </div>
         </div>
@@ -1696,9 +1070,7 @@
     const App = () => {
       const persistedRef = useRef(loadPersistedAppState());
       const persisted = persistedRef.current || {};
-      const initialView = (
-        persisted.view === 'MATCH' && (!persisted.p1Setup || !persisted.p2Setup)
-      ) ? 'HOME' : (persisted.view || 'HOME');
+      const initialView = (persisted.view === 'MATCH' && (!persisted.p1Setup || !persisted.p2Setup)) ? 'HOME' : (persisted.view || 'HOME');
 
       const [view, setView] = useState(initialView);
       const [p1Setup, setP1Setup] = useState(persisted.p1Setup || null);
@@ -1711,89 +1083,42 @@
       const [registeredOpponent, setRegisteredOpponent] = useState(persisted.registeredOpponent || null);
       const [matchSnapshot, setMatchSnapshot] = useState(persisted.matchSnapshot || null);
 
-      const clearSession = () => {
-        setLoggedInUser('');
-        setLoggedInPin('');
-        setUserData(EMPTY_USER_DATA);
-      };
+      const clearSession = () => { setLoggedInUser(''); setLoggedInPin(''); setUserData(EMPTY_USER_DATA); };
 
       useEffect(() => {
         const restoreSession = async () => {
-          if (!_supabase) {
-            setIsLoadingSession(false);
-            return;
-          }
+          if (!_supabase) { setIsLoadingSession(false); return; }
           try {
             const { data: { session } } = await _supabase.auth.getSession();
             if (session) {
               const name = session.user.user_metadata?.display_name || '';
               setLoggedInUser(name);
-              const { data: dbData } = await _supabase
-                .from('user_data')
-                .select('match_history, player_dict')
-                .eq('id', session.user.id)
-                .single();
-              setUserData({
-                matchHistory: dbData?.match_history || [],
-                playerDict: dbData?.player_dict || {}
-              });
+              const { data: dbData } = await _supabase.from('user_data').select('match_history, player_dict').eq('id', session.user.id).single();
+              setUserData({ matchHistory: dbData?.match_history || [], playerDict: dbData?.player_dict || {} });
             }
-          } catch (_error) {
-            clearSession();
-          } finally {
-            setIsLoadingSession(false);
-          }
+          } catch (_error) { clearSession(); } finally { setIsLoadingSession(false); }
         };
         restoreSession();
       }, []);
 
       useEffect(() => {
-        try {
-          window.sessionStorage.setItem(APP_STATE_KEY, JSON.stringify({
-            view, p1Setup, p2Setup, matchMode, registeredOpponent, matchSnapshot
-          }));
-        } catch (_error) {}
+        try { window.sessionStorage.setItem(APP_STATE_KEY, JSON.stringify({ view, p1Setup, p2Setup, matchMode, registeredOpponent, matchSnapshot })); } catch (_error) {}
       }, [view, p1Setup, p2Setup, matchMode, registeredOpponent, matchSnapshot]);
 
-      const handleAuthSuccess = ({ name, pin, data }) => {
-        setLoggedInUser(name || '');
-        setLoggedInPin(pin || '');
-        setUserData(data || EMPTY_USER_DATA);
-      };
-
-      const handleNameChangeSuccess = (newName, newUserData) => {
-        setLoggedInUser(newName);
-        if (newUserData) setUserData(newUserData);
-      };
-
-      const handlePinChangeSuccess = (newPin) => {
-        setLoggedInPin(newPin);
-      };
-
-      const handleLogout = async () => {
-        clearSession();
-        if (_supabase) await _supabase.auth.signOut();
-      };
+      const handleAuthSuccess = ({ name, pin, data }) => { setLoggedInUser(name || ''); setLoggedInPin(pin || ''); setUserData(data || EMPTY_USER_DATA); };
+      const handleNameChangeSuccess = (newName, newUserData) => { setLoggedInUser(newName); if (newUserData) setUserData(newUserData); };
+      const handlePinChangeSuccess = (newPin) => { setLoggedInPin(newPin); };
+      const handleLogout = async () => { clearSession(); if (_supabase) await _supabase.auth.signOut(); };
 
       const saveUserData = async (nextData) => {
         if (!_supabase) return false;
         const { data: { session } } = await _supabase.auth.getSession();
         if (!session) return false;
         try {
-          const { error } = await _supabase
-            .from('user_data')
-            .upsert({
-              id: session.user.id,
-              match_history: nextData.matchHistory,
-              player_dict: nextData.playerDict,
-              updated_at: new Date().toISOString()
-            });
+          const { error } = await _supabase.from('user_data').upsert({ id: session.user.id, match_history: nextData.matchHistory, player_dict: nextData.playerDict, updated_at: new Date().toISOString() });
           if (error) throw error;
-          setUserData(nextData);
-          return true;
-        } catch (_error) {
-          return false;
-        }
+          setUserData(nextData); return true;
+        } catch (_error) { return false; }
       };
 
       const appendUniqueMatch = (historyList, matchData) => {
@@ -1805,11 +1130,7 @@
       const handleSaveMatch = async (matchData, p1, p2) => {
         const nextData = {
           matchHistory: appendUniqueMatch(userData.matchHistory || [], matchData),
-          playerDict: {
-            ...(userData.playerDict || {}),
-            [p1.name]: p1.sl,
-            [p2.name]: p2.sl
-          }
+          playerDict: { ...(userData.playerDict || {}), [p1.name]: p1.sl, [p2.name]: p2.sl }
         };
         const saved = await saveUserData(nextData);
         if (!saved) return false;
@@ -1819,134 +1140,46 @@
           const transientClient = createTransientClient();
           const { data: authData, error: authError } = await signInWithNameAndPin(transientClient, registeredOpponent.name, registeredOpponent.pin);
           if (authError || !authData?.user) throw new Error('対戦相手の認証に失敗しました。');
-
-          const { data: opponentData } = await transientClient
-            .from('user_data')
-            .select('match_history, player_dict')
-            .eq('id', authData.user.id)
-            .single();
-
+          const { data: opponentData } = await transientClient.from('user_data').select('match_history, player_dict').eq('id', authData.user.id).single();
           const nextOpponentData = {
             matchHistory: appendUniqueMatch(opponentData?.match_history || [], matchData),
-            playerDict: {
-              ...(opponentData?.player_dict || {}),
-              [p1.name]: p1.sl,
-              [p2.name]: p2.sl
-            }
+            playerDict: { ...(opponentData?.player_dict || {}), [p1.name]: p1.sl, [p2.name]: p2.sl }
           };
-
-          const { error: upsertError } = await transientClient
-            .from('user_data')
-            .upsert({
-              id: authData.user.id,
-              match_history: nextOpponentData.matchHistory,
-              player_dict: nextOpponentData.playerDict,
-              updated_at: new Date().toISOString()
-            });
+          const { error: upsertError } = await transientClient.from('user_data').upsert({ id: authData.user.id, match_history: nextOpponentData.matchHistory, player_dict: nextOpponentData.playerDict, updated_at: new Date().toISOString() });
           await transientClient.auth.signOut();
           if (upsertError) throw upsertError;
           return true;
-        } catch (_error) {
-          return false;
-        }
+        } catch (_error) { return false; }
       };
 
       const handleDeleteMatches = async (startTimes) => {
         const target = Array.isArray(startTimes) ? startTimes : [];
-        const nextData = {
-          matchHistory: (userData.matchHistory || []).filter(m => !target.includes(m.startTime)),
-          playerDict: userData.playerDict || {}
-        };
+        const nextData = { matchHistory: (userData.matchHistory || []).filter(m => !target.includes(m.startTime)), playerDict: userData.playerDict || {} };
         return saveUserData(nextData);
-      };
-
-      const handleStartMatch = (p1, p2) => {
-        setP1Setup(p1);
-        setP2Setup(p2);
-        setMatchSnapshot(null);
-        setView('MATCH');
-      };
-
-      const handleOpenNewMatch = () => {
-        setMatchMode('GUEST');
-        setRegisteredOpponent(null);
-        setView('MATCH_TYPE');
-      };
-
-      const handleSelectGuestMatch = () => {
-        setMatchMode('GUEST');
-        setRegisteredOpponent(null);
-        setView('SETUP');
-      };
-
-      const handleSelectRegisteredMatch = () => {
-        if (!loggedInUser) {
-          alert('登録ユーザーと対戦を選ぶにはログインしてください。');
-          return;
-        }
-        setView('OPPONENT_AUTH');
-      };
-
-      const handleRegisteredOpponentSubmit = async (opponentName, opponentPin) => {
-        if (!loggedInUser) {
-          alert('先にログインしてください。');
-          return false;
-        }
-        if (opponentName === loggedInUser) {
-          alert('対戦相手には別の登録ユーザーを入力してください。');
-          return false;
-        }
-        try {
-          const transientClient = createTransientClient();
-          const { data: authData, error: authError } = await signInWithNameAndPin(transientClient, opponentName, opponentPin);
-          if (authError || !authData?.user) throw new Error('対戦相手の名前またはパスワードが間違っています。');
-
-          const { data: opponentData, error: selectError } = await transientClient
-            .from('user_data')
-            .select('match_history, player_dict')
-            .eq('id', authData.user.id)
-            .single();
-          await transientClient.auth.signOut();
-          if (selectError) throw selectError;
-
-          const opponentSkill = getLatestSkillForPlayer(opponentName, {
-            matchHistory: opponentData?.match_history || [],
-            playerDict: opponentData?.player_dict || {}
-          }, 4);
-
-          setRegisteredOpponent({ name: opponentName, pin: opponentPin, sl: opponentSkill });
-          setMatchMode('REGISTERED');
-          setView('SETUP');
-          return true;
-        } catch (error) {
-          alert(error.message || '対戦相手の認証に失敗しました。');
-          return false;
-        }
-      };
-
-      const handleBackToSetup = () => {
-        setMatchSnapshot(null);
-        setView('HOME');
       };
 
       if (isLoadingSession) return null;
 
       return (
         <React.Fragment>
-          {view === 'HOME' && <HomeScreen onNewMatch={handleOpenNewMatch} onViewMatchData={() => setView('HISTORY')} onViewPersonalData={() => setView('PERSONAL_DATA')} loggedInUser={loggedInUser} loggedInPin={loggedInPin} onAuthSuccess={handleAuthSuccess} onLogout={handleLogout} onNameChangeSuccess={handleNameChangeSuccess} onPinChangeSuccess={handlePinChangeSuccess} />}
-          {view === 'MATCH_TYPE' && <MatchTypeScreen onBack={() => setView('HOME')} onGuest={handleSelectGuestMatch} onRegistered={handleSelectRegisteredMatch} />}
-          {view === 'OPPONENT_AUTH' && <OpponentAuthScreen onBack={() => setView('MATCH_TYPE')} onSubmit={handleRegisteredOpponentSubmit} />}
-          {view === 'SETUP' && <SetupScreen onStart={handleStartMatch} onBack={() => setView('HOME')} playerDict={userData.playerDict || {}} initialP1={{
-            name: loggedInUser || 'プレイヤー1',
-            sl: loggedInUser ? getLatestSkillForPlayer(loggedInUser, userData, 6) : 6
-          }} initialP2={matchMode === 'REGISTERED' && registeredOpponent ? {
-            name: registeredOpponent.name,
-            sl: registeredOpponent.sl
-          } : {
-            name: 'プレイヤー2',
-            sl: 4
+          {view === 'HOME' && <HomeScreen onNewMatch={() => { setMatchMode('GUEST'); setRegisteredOpponent(null); setView('MATCH_TYPE'); }} onViewMatchData={() => setView('HISTORY')} onViewPersonalData={() => setView('PERSONAL_DATA')} loggedInUser={loggedInUser} loggedInPin={loggedInPin} onAuthSuccess={handleAuthSuccess} onLogout={handleLogout} onNameChangeSuccess={handleNameChangeSuccess} onPinChangeSuccess={handlePinChangeSuccess} />}
+          {view === 'MATCH_TYPE' && <MatchTypeScreen onBack={() => setView('HOME')} onGuest={() => { setMatchMode('GUEST'); setRegisteredOpponent(null); setView('SETUP'); }} onRegistered={() => { if (!loggedInUser) alert('登録ユーザーと対戦を選ぶにはログインしてください。'); else setView('OPPONENT_AUTH'); }} />}
+          {view === 'OPPONENT_AUTH' && <OpponentAuthScreen onBack={() => setView('MATCH_TYPE')} onSubmit={async (opponentName, opponentPin) => {
+            if (opponentName === loggedInUser) { alert('対戦相手には別の登録ユーザーを入力してください。'); return false; }
+            try {
+              const transientClient = createTransientClient();
+              const { data: authData, error: authError } = await signInWithNameAndPin(transientClient, opponentName, opponentPin);
+              if (authError || !authData?.user) throw new Error('対戦相手の名前またはパスワードが間違っています。');
+              const { data: opponentData, error: selectError } = await transientClient.from('user_data').select('match_history, player_dict').eq('id', authData.user.id).single();
+              await transientClient.auth.signOut();
+              if (selectError) throw selectError;
+              const opponentSkill = getLatestSkillForPlayer(opponentName, { matchHistory: opponentData?.match_history || [], playerDict: opponentData?.player_dict || {} }, 4);
+              setRegisteredOpponent({ name: opponentName, pin: opponentPin, sl: opponentSkill });
+              setMatchMode('REGISTERED'); setView('SETUP'); return true;
+            } catch (error) { alert(error.message || '対戦相手の認証に失敗しました。'); return false; }
           }} />}
-          {view === 'MATCH' && <MatchScreen p1Setup={p1Setup} p2Setup={p2Setup} onBack={handleBackToSetup} onSaveMatch={handleSaveMatch} initialMatchState={matchSnapshot} onMatchStateChange={setMatchSnapshot} />}
+          {view === 'SETUP' && <SetupScreen onStart={(p1, p2) => { setP1Setup(p1); setP2Setup(p2); setMatchSnapshot(null); setView('MATCH'); }} onBack={() => setView('HOME')} playerDict={userData.playerDict || {}} initialP1={{ name: loggedInUser || 'プレイヤー1', sl: loggedInUser ? getLatestSkillForPlayer(loggedInUser, userData, 6) : 6 }} initialP2={matchMode === 'REGISTERED' && registeredOpponent ? { name: registeredOpponent.name, sl: registeredOpponent.sl } : { name: 'プレイヤー2', sl: 4 }} />}
+          {view === 'MATCH' && <MatchScreen p1Setup={p1Setup} p2Setup={p2Setup} onBack={() => { setMatchSnapshot(null); setView('HOME'); }} onSaveMatch={handleSaveMatch} initialMatchState={matchSnapshot} onMatchStateChange={setMatchSnapshot} />}
           {view === 'HISTORY' && <HistoryScreen onBack={() => setView('HOME')} loggedInUser={loggedInUser} matchHistory={userData.matchHistory || []} onDeleteMatches={handleDeleteMatches} />}
           {view === 'PERSONAL_DATA' && <PersonalDataScreen onBack={() => setView('HOME')} loggedInUser={loggedInUser} matchHistory={userData.matchHistory || []} />}
         </React.Fragment>
@@ -1954,8 +1187,6 @@
     };
 
     const root = ReactDOM.createRoot(document.getElementById('root'));
-    
-    // 安全装置: URLが置き換わっていないか、Supabaseが読み込めていない場合はエラー画面を出す
     if (!isSupabaseConfigured || !window.supabase) {
       root.render(
         <div className="flex flex-col items-center justify-center h-[100dvh] bg-[#0F4C3A] text-white text-center p-8">
@@ -1963,8 +1194,8 @@
           <h2 className="text-xl font-bold mb-4">初期化エラー</h2>
           <p className="text-sm text-gray-300 leading-relaxed mb-4">
             {!window.supabase 
-              ? "データベースとの通信スクリプトが読み込めませんでした。広告ブロッカー（Braveなど）やトラッキング防止機能をオフにして再読み込みしてください。" 
-              : "GitHub Actions による自動設定が完了していません。デプロイ処理が終わるのをお待ちください。"}
+              ? "アプリのスクリプトが読み込めませんでした。" 
+              : "GitHub Actions の設定が完了していません。"}
           </p>
         </div>
       );
