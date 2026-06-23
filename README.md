@@ -1,6 +1,6 @@
 # JPA Scoreboard
 
-GitHub Pages × Supabase で動く麻雀スコア管理アプリです。  
+GitHub Pages × Supabase で動くビリヤードスコア管理アプリです。  
 **一度だけ** 以下の手順を行えば、以降は `main` ブランチへ push するだけで自動デプロイされます。
 
 ---
